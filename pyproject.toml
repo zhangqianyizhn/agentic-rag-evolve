@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-rag-evolve"
+version = "0.1.0"
+description = "Trace-guided evolution framework for DeepRead and RAG agents"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_rag_evolve"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

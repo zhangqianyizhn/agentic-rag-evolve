@@ -27,7 +27,8 @@
 - [x] 移除 target 内部重复 CLI，建立框架级 `run_deepread.py`；
 - [x] 一次运行输出 manifest、predictions、summary 和逐问题 trace；
 - [x] 建立历史 store/run 的只读结构校验；
-- 建立不依赖 DeepRead 内部实现的 evaluator；
+- [x] 建立不依赖 DeepRead 内部实现的 evaluator；
+- [x] 支持逐题对齐历史 ruc-ov 评测结果；
 - 用 5–10 个 FinanceBench 问题 smoke test。
 
 完成条件：新项目不调用 ruc-ov pipeline 也能运行 v0，并能与历史产物逐问题比较。

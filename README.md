@@ -24,6 +24,7 @@ systems/deepread/
   PROVENANCE.md             # 快照规则与下一步提取边界
 src/agentic_rag_evolve/
   providers/                # target 不可见的模型配置、鉴权与传输实现
+  evaluation/               # F1、证据召回、LLM judge 与历史结果对比
   deepread_runner.py        # 稳定单数据集执行协议
   reference_validation.py  # golden store/run 只读校验
 runner/                     # 框架 CLI；不属于被进化的 DeepRead
@@ -49,3 +50,13 @@ Markdown ingestion + 最小 DeepRead runtime + 隔离 gold label 的 DocumentQA 
 ```
 
 详细说明见 [系统架构](docs/architecture.md)和[实施路线](docs/roadmap.md)。
+
+## 当前入口
+
+```bash
+uv run python runner/validate_reference.py --store <store_index> --run <historical_run>
+uv run python runner/run_deepread.py --dataset <dataset.jsonl> --store <store_index> --output <empty_run_dir>
+uv run python runner/evaluate_deepread.py --dataset <dataset.jsonl> --predictions <predictions.jsonl> --output <empty_eval_dir> --judge
+```
+
+模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)。

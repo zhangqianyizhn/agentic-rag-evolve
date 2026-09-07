@@ -81,3 +81,24 @@ def load_provider_bundle(env_file: Path | None = None) -> ProviderBundle:
         ),
         reranker=reranker,
     )
+
+
+def load_chat_model(env_file: Path | None = None) -> OpenAICompatibleChatModel:
+    if env_file is not None:
+        load_dotenv(Path(env_file), override=False)
+    return OpenAICompatibleChatModel(
+        model_name=_required("LLM_MODEL"),
+        base_url=_required("LLM_BASE_URL"),
+        api_key=_required("LLM_API_KEY"),
+    )
+
+
+def load_embedding_model(env_file: Path | None = None) -> VolcengineMultimodalEmbeddingModel:
+    if env_file is not None:
+        load_dotenv(Path(env_file), override=False)
+    return VolcengineMultimodalEmbeddingModel(
+        model_name=_required("EMBEDDING_MODEL_NAME"),
+        base_url=_required("EMBEDDING_BASE_URL"),
+        api_key=_required("EMBEDDING_API_KEY"),
+        dimension=int(os.getenv("EMBEDDING_DIMENSION", "2048")),
+    )

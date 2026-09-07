@@ -1,57 +1,45 @@
 # AgenticRAGEvolve
 
-面向 DeepRead / ruc-ov 的自动化 RAG 改进系统。项目把人工执行的“bad case 对比、原因定位、修改系统、重新评测”变成可复现、可审计的闭环，同时把跨数据集泛化作为一等目标。
+面向 DeepRead 文档问答系统的自动化诊断、修复与验证框架。项目参考 HarnessFix 的闭环结构，但会在开发过程中逐步验证架构决策，而不是预先固定一套缺陷分类或修复算子。
 
-当前阶段只建立系统边界、模块契约与开发路线，不实现具体诊断或修复逻辑。
+当前工作的第一目标是重建一个边界清晰、可独立运行、可复制修改的历史 DeepRead baseline。诊断和自动修复将在 baseline 的执行协议与轨迹协议稳定后实现。
 
-## 问题边界
+## 冻结基线
 
-输入主要来自 `ruc-ov-eval`：
+初始迭代严格基于：
 
-- `generated_answers.json`：问题、标准答案、标准证据、生成答案、召回文本及 token/延迟；
-- `qa_eval_detailed_results.json`：逐问题正确性评价；
-- `deepread_run.log`：按 `query_id` 记录的模型调用、工具调用、工具结果和最终答案；
-- DeepRead corpus、目录树/id map、实验配置和对应 Git revision。
+- DeepRead：`7fe3ba23f81d88ee83552ba7f38cd6cc25e6c1eb`
+- ruc-ov-eval：`fb8a301cfd9cb92f19a5c95cd0066da1133b734b`
 
-输出不是一组写死的经验规则，而是：可定位到轨迹证据和代码位置的诊断、可验证的改进假设、隔离生成的补丁，以及跨数据集验证报告。
+这一版本已有 global 模式所需的 `get_doc_structure`，但没有后续加入的 session pagination、跨轮检索去重、停滞提示和模型专项适配。版本锁定信息见 [baseline.lock.json](systems/deepread/baseline.lock.json)。
 
-## 闭环
+## 当前结构
 
 ```text
-实验登记 -> 产物归一化 -> 失败诊断 -> 跨样本归并 -> 改进提案
-   ^                                                |
-   |                                                v
-接受/拒绝 <- 多级验证门禁 <- 隔离补丁应用 <- 风险与范围检查
+systems/deepread/
+  DeepRead/                 # 7fe3ba2 的原样源码快照
+  baseline.lock.json        # DeepRead 与 ruc-ov-eval 来源 revision
+  PROVENANCE.md             # 快照规则与下一步提取边界
+src/agentic_rag_evolve/     # 新框架代码（后续逐模块增加）
+docs/
+  architecture.md           # 当前阶段架构与代码归属
+  roadmap.md                # 渐进实施顺序
+  harnessfix-alignment.md   # 与 HarnessFix 的简要目录对齐
+  baseline-extraction.md    # 历史 baseline 重建方案
 ```
 
-与 HarnessFix 的关键区别是：
-
-- 使用面向文档 QA/RAG 的轨迹表示，而不是复用通用 agent 的固定 HTIR 分类；
-- 缺陷标签和修复方式允许由证据归纳产生，不要求落入预枚举类别/算子；
-- 标准答案和标准证据只用于诊断与训练集分析，测试集仅用于最终评价；
-- 改进是否成立由 bad-case、同数据集留出集、跨数据集回归和成本约束共同决定。
-
-详细设计见 [系统架构](docs/architecture.md)，实施顺序见 [路线图](docs/roadmap.md)，版本管理约定见 [开发流程](docs/development.md)。
-
-## 计划目录
+## 实施主线
 
 ```text
-src/agentic_rag_evolve/
-  artifacts/      # ruc-ov / DeepRead 产物适配与校验
-  trace_ir/       # QueryTrace 与证据引用的统一表示
-  diagnosis/      # 单样本因果诊断与诊断质量检查
-  synthesis/      # 跨样本/跨数据集假设归并
-  repair/         # 修改范围、补丁生成、静态检查
-  evaluation/     # 实验运行、配对比较、泛化门禁
-  memory/         # 假设、补丁、结果与否定经验
-  orchestration/  # 可恢复的闭环状态机
+历史源码冻结
+    ↓
+最小 DeepRead runtime + DocumentQA 协议
+    ↓
+单数据集 runner / evaluator / trace
+    ↓
+与历史 ruc-ov baseline 对齐
+    ↓
+失败诊断 → 改进计划 → 隔离修改 → 验证门禁
 ```
 
-## 当前状态
-
-- [x] 架构与模块边界
-- [x] 分阶段实施路线
-- [x] Git/实验历史管理约定
-- [ ] M1：评测产物登记与归一化
-- [ ] M2：DeepRead 轨迹 IR
-- [ ] M3 及以后：诊断、归并、修复和验证闭环
+详细说明见 [系统架构](docs/architecture.md)和[实施路线](docs/roadmap.md)。

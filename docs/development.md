@@ -2,7 +2,7 @@
 
 ## Git 边界
 
-本仓库保存框架代码、schema、测试、配置模板、ADR 和小型脱敏 fixture。`ruc-ov-eval`、DeepRead 与 HarnessFix 都是外部参考仓库，不复制到本仓库，也不把本地绝对路径写进已提交配置。
+本仓库保存冻结的 DeepRead baseline、框架代码、schema、测试、配置模板、ADR 和小型脱敏 fixture。HarnessFix 是只读参考；ruc-ov-eval 是 baseline 提取来源，不整体复制。任何迁入源码都要记录来源 revision 和许可证，不把本地绝对路径写进已提交配置。
 
 大体积日志、corpus、模型输出、worktree 和实验运行目录分别放在 `artifacts/`、`runs/`、`worktrees/`，默认忽略。可复现信息由小型 manifest 进入版本控制。
 

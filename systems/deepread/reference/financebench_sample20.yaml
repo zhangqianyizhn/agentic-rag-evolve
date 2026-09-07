@@ -1,0 +1,34 @@
+# Sanitized behavioral reference from ruc-ov-eval fb8a301c.
+# This is not yet the AgenticRAGEvolve runtime configuration schema.
+source:
+  repository: git@github.com:g121370451/ruc-ov-eval.git
+  revision: fb8a301cfd9cb92f19a5c95cd0066da1133b734b
+  path: ov_test/config_deepread_global/financebench_sample20.yaml
+
+dataset_name: FinanceBench_sample20
+
+store:
+  type: DeepRead
+  enable_vector: true
+  enable_hybrid: false
+  enable_semantic: false
+  neighbor_window: "1,-1"
+  max_rounds: 50
+  use_pymupdf: true
+
+execution:
+  max_workers: 1
+  ingest_workers: 1
+  retrieval_topk: 5
+  max_queries: null
+  skip_ingestion: true
+
+llm:
+  model: doubao-seed-1-8-251228
+  temperature: 0
+  base_url: https://ark.cn-beijing.volces.com/api/v3
+  api_key_env: LLM_API_KEY
+
+notes:
+  - Relative data and output paths are intentionally omitted until the new workspace layout is defined.
+  - The plaintext credential present in the historical file was intentionally not copied.

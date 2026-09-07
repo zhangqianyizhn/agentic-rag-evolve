@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "deepread": {
+    "repository": "git@github.com:zhangqianyizhn/DeepRead.git",
+    "revision": "7fe3ba23f81d88ee83552ba7f38cd6cc25e6c1eb",
+    "snapshot_path": "systems/deepread/DeepRead"
+  },
+  "ruc_ov_eval": {
+    "repository": "git@github.com:g121370451/ruc-ov-eval.git",
+    "revision": "fb8a301cfd9cb92f19a5c95cd0066da1133b734b",
+    "runtime_reference": "ov_test/src/core/deepread_store.py"
+  }
+}

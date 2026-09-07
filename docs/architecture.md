@@ -1,113 +1,84 @@
-# 系统架构
+# 当前阶段的系统架构
 
-## 1. 设计目标
+这份架构是可演进的工作假设。项目刚开始时，优先建立可运行事实，再根据迁移、轨迹和诊断实验修订模块边界。
 
-系统需要同时解决两类目标：一是把针对单个数据集的人工 bad-case 优化自动化；二是继续探索 global DeepRead 的准确率上限。二者共享同一闭环，但验收标准不同：局部修复要解决明确失败，通用改进还必须通过跨数据集门禁。
+## 1. 仓库同时包含两类代码
 
-首版只面向 DeepRead，但适配层不能把核心逻辑绑定到某个数据集。新系统作为独立控制面，通过路径和 Git revision 引用 `ruc-ov-eval` 与 DeepRead，不复制其代码和数据。
+AgenticRAGEvolve 不再被定义为只读取外部 ruc-ov 的“控制面”。它将同时维护：
 
-## 2. 核心数据对象
+1. **被进化系统**：一份边界清晰的 DeepRead baseline 及其后续候选版本；
+2. **进化框架**：benchmark、runner、evaluator、诊断、修复和验证闭环。
 
-后续实现先稳定以下对象，再引入 LLM 诊断或自动改码。
+这样修改 agent 不需要阅读整个 ruc-ov-eval，也允许索引、检索工具和 agent loop 一起成为潜在改进对象。
 
-### ExperimentManifest
+## 2. 初始版本是历史版本，不是当前 HEAD
 
-记录一次可复现实验：数据集/切分、评测配置、目标仓库与 revision、模型和检索参数、输入输出路径、随机性设置、父实验及变更假设。密钥只记录环境变量名，不保存值。
+基线固定为 DeepRead `7fe3ba23...` 和 ruc-ov-eval `fb8a301c...`。后续已有的 session pagination、跨轮去重、停滞提示等能力应被视为未来可能重新发现或引入的改进，不能出现在 v0 中。
 
-### QueryTrace
+`systems/deepread/DeepRead/` 当前是 DeepRead 提交的原样快照。在完成行为对齐前，不对这份源码做整理式重构。ruc-ov-eval 中属于 DeepRead runtime 的逻辑将逐项迁入相邻模块，并记录原文件、原 revision 和迁移理由。
 
-以一个问题为单位对齐：
+## 3. 暂定职责边界
 
-- 问题、样本/文档标识、标准答案和标准证据；
-- 生成答案、指标、延迟与 token；
-- 有序的模型/工具事件；
-- 每次搜索的 query、scope、候选、rank、score、文档/节点/段落坐标；
-- read 操作、实际进入上下文的证据和最终引用；
-- corpus/id map/config/revision 等来源引用。
+### 被进化系统 `systems/deepread`
 
-原始事件必须保留不可变引用。IR 中的每个诊断证据都应能回到原文件和事件，而不是只保存摘要。
+包含任何会改变 DeepRead 行为或准确率的实现：
 
-### Diagnosis
+- Markdown/corpus 解析和目录树；
+- embedding 与索引建立；
+- BM25、regex、vector、hybrid、semantic 检索；
+- global 文档定位和 `get_doc_structure`；
+- `read_section`；
+- agent loop、prompt、工具 schema、上下文组织和停止条件；
+- DeepRead 运行配置及必要 telemetry。
 
-诊断不是强制单选的固定 taxonomy，而是结构化因果论证：失败表现、最早可干预节点、支持/反驳证据、候选根因、置信度、建议修改范围，以及仍需做的判别实验。可以附加开放标签用于聚类，但标签不决定修复算子。
+索引建立不是评测辅助代码，因为分片、标题和层级结构直接决定检索效果。
 
-### ImprovementHypothesis
+### Benchmark
 
-描述一组失败为何可能由同一机制导致、预期改善哪些 cohort、可能伤害哪些 cohort、最小修改范围、所需消融实验和接受条件。
+包含与某个数据集语义有关、但不应被 DeepRead 修改的代码：
 
-### PatchCandidate / ValidationReport
+- 原始数据到统一 DocumentQA task 的转换；
+- train/development/test 切分；
+- gold answer、gold evidence 和问题元数据；
+- 数据集特定的答案标准化与评分规则。
 
-补丁记录目标 revision、diff、生成依据和风险；验证报告保存配对实验结果、逐 cohort 变化、成本变化、统计不确定性及接受/拒绝原因。失败补丁也进入记忆库。
+### Runner / Evaluator
 
-## 3. 主要模块
+Runner 负责用固定协议调用任意 DeepRead candidate，产生 prediction、trajectory、成本和异常记录。Evaluator 只根据任务与输出评分，不导入 DeepRead 内部模块。
 
-### A. 实验登记与产物适配 `artifacts`
+### Evolution
 
-发现并校验 ruc-ov 的 `generated_answers.json`、`qa_eval_detailed_results.json`、`deepread_run.log`、配置与 corpus 元数据；建立稳定 ID，把分片运行和合并运行统一起来。此层只做无损读取和 schema 校验。
+在基础执行闭环稳定后再实现：轨迹编译、失败诊断、跨样本归并、改进计划、隔离修改、diff 审计、验证门禁和进化记忆。
 
-### B. DeepRead 轨迹编译 `trace_ir`
+## 4. 第一条垂直切片
 
-按 `query_id` 合并 JSONL 事件，并与评测记录对齐。显式表示 global 模式的两阶段行为：全库分片检索、文档定位/目录加载、文档内检索、section read、答案合成。编译器要容忍乱序并发日志、重试、缺失事件和旧版本 schema。
+第一条切片只覆盖一个小型 FinanceBench global 子集：
 
-### C. 结果分解与单样本诊断 `diagnosis`
+```text
+DocumentQA tasks
+    ↓
+DeepRead v0 ingest/index
+    ↓
+DeepRead v0 agent retrieval + answer
+    ↓
+predictions + per-query JSONL trace
+    ↓
+deterministic metrics + optional LLM judge
+```
 
-先计算确定性信号，再交给诊断 agent：标准证据是否可映射到 corpus、是否进入候选、是否被 agent 读取、答案是否受已读证据支持、是否存在错误文档/时间/单位混合，以及工具异常、轮次耗尽和停滞等执行信号。
+选择 FinanceBench 是因为它同时包含 global 文档选择、年份/公司辨别、表格数值、多证据和计算问题。最初只需 5–10 个问题用于行为对齐，不把该小样本分数作为研究结论。
 
-这些是观测维度，不是封闭缺陷枚举。诊断 agent 必须给出事件锚点和反事实：如果在某个最早节点采取何种不同动作，失败为何可能被避免。
+## 5. 当前不提前固定的决策
 
-### D. Cohort 构建与假设归并 `synthesis`
+- 最终缺陷 taxonomy；
+- 修复 operator registry；
+- 诊断使用单 agent 还是多 agent；
+- candidate 使用目录复制、Git worktree 还是其他隔离方式；
+- 多数据集调度和长期记忆存储实现；
+- 哪些 telemetry 必须侵入 DeepRead runtime。
 
-按可解释特征聚合诊断，例如问题组成性、证据跨度、文档数量、答案类型、所需检索阶段、工具轨迹模式。系统从诊断中归纳改进假设，合并重复原因，并把“通用机制”和“数据集特有策略”分开报告。
+这些问题将在前置模块提供真实约束后分别形成 ADR。
 
-### E. 修复规划与补丁执行 `repair`
+## 6. 数据隔离原则
 
-修改对象包括 prompt、工具 schema/反馈、检索与排序、目录加载策略、状态管理、停止条件、上下文预算和评测集成。这里不使用固定 operator registry；模型可以提出新修改，但必须声明允许文件、修改预算、预期机制和验证计划。补丁只在临时 worktree/分支应用，并经过 diff、语法、单测和敏感信息检查。
-
-### F. 实验与验证门禁 `evaluation`
-
-统一调用现有 ruc-ov runner，支持断点恢复、缓存、并发和失败重试。验证从低成本到高成本逐级进行：
-
-1. 静态检查和单元测试；
-2. 目标 bad case 重放；
-3. 同数据集未参与诊断的 validation；
-4. 多数据集回归集；
-5. 完整评测或候选间竞赛。
-
-门禁同时比较 Accuracy、evidence Recall、拒答行为、token、延迟与异常率。接受规则不能只看被分析的 bad case。
-
-### G. 进化记忆 `memory`
-
-保存实验谱系、诊断、假设、补丁和验证结果。区分事实证据、模型推断和最终决策；记录被拒补丁及失败条件，避免循环尝试。记忆检索以机制和轨迹特征为主，数据集名仅作为一个特征。
-
-### H. 闭环编排 `orchestration`
-
-用可恢复状态机连接各模块，每一步写入 manifest 和完成标记。支持从任意阶段继续、预算上限、人工审批点和候选并行比较。编排层不包含诊断规则或数据集业务逻辑。
-
-## 4. 与现有代码的接口
-
-首版直接利用下列现有接口，不先改 ruc-ov：
-
-- `ov_test/src/core/deepread_store.py`：DeepRead 配置入口、`run_agent` 调用、`collected_texts` 与 token 汇总；
-- `ov_test/src/pipeline.py`：生成记录、Recall 计算、LLM judge 和 DeepRead 日志统计；
-- `DeepRead/agent/runner.py` 与 `agent/logger.py`：模型/工具/final_answer 事件；
-- `DeepRead/tool/*`：BM25、regex、vector、hybrid、semantic、read_section 及 global 文档目录加载行为；
-- 各 adapter：数据集标准答案、标准证据和答案后处理语义。
-
-当 M1/M2 暴露出缺失的可观测字段时，再以最小补丁增强 DeepRead 日志。不要先为了“完整 telemetry”大范围修改被测系统。
-
-## 5. 防止数据集过拟合
-
-- 数据按 diagnosis/train、validation、test 三种用途隔离；test gold 不进入诊断和补丁提示。
-- 每个改进至少报告 micro、macro-dataset 与最差数据集变化，不能用总体均值掩盖回退。
-- 优先做 leave-one-dataset-out：在若干数据集诊断/修复，在未见数据集验证迁移。
-- 对模型、温度、并发、语料版本和 judge 版本做配对控制；必要时重复运行估计方差。
-- 将 prompt 中显式数据集知识标记为 dataset-specific，不与通用候选混为一谈。
-- 诊断质量单独评估；不能因补丁偶然涨分就倒推诊断正确。
-
-## 6. 明确不在首版做的事
-
-- 不重新实现 ruc-ov 的数据 adapter、指标或 DeepRead 检索器；
-- 不直接在主工作目录上让修改 agent 自由改码；
-- 不从全部测试集 bad case 反复调参后仍把测试分数当泛化结果；
-- 不以一份固定缺陷分类表或修复算子表限制系统探索空间；
-- 不把大体积 corpus、日志、模型输出或密钥提交到 Git。
+即使在原型阶段，也区分用于提出改进的 development 样本与最终 test。若 validation 回退被反馈给下一轮，它就已经成为 development 数据，不再承担无偏最终评测角色。标准答案和标准证据不能进入 test 阶段的修改提示。

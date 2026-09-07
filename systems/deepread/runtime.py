@@ -51,6 +51,19 @@ class DeepReadQueryResult:
         }
 
 
+class _ScopedLogger:
+    def __init__(self, logger: JsonlLogger, run_id: str | None, task_id: str | None) -> None:
+        self._logger = logger
+        self._scope = {
+            key: value
+            for key, value in {"run_id": run_id, "task_id": task_id}.items()
+            if value is not None
+        }
+
+    def log(self, event: str, **fields: Any) -> None:
+        self._logger.log(event, **self._scope, **fields)
+
+
 class GlobalDeepReadRuntime:
     """Load one shared corpus index and execute DeepRead queries against it.
 
@@ -69,6 +82,7 @@ class GlobalDeepReadRuntime:
         chat_model: ChatModel | None = None,
         embedding_model: EmbeddingModel | None = None,
         reranker: Reranker | None = None,
+        run_id: str | None = None,
     ) -> None:
         self.store_path = Path(store_path)
         self.trace_path = Path(trace_path)
@@ -76,6 +90,7 @@ class GlobalDeepReadRuntime:
         self.chat_model = chat_model
         self.embedding_model = embedding_model
         self.reranker = reranker
+        self.run_id = run_id
         self._logger: JsonlLogger | None = None
         self._logger_lock = threading.Lock()
         self._doc_index: DocIndex | None = None
@@ -125,7 +140,7 @@ class GlobalDeepReadRuntime:
             encoding="utf-8",
         )
 
-    def query(self, question: str) -> DeepReadQueryResult:
+    def query(self, question: str, *, task_id: str | None = None) -> DeepReadQueryResult:
         question = question.strip()
         if not question:
             raise ValueError("question must not be empty")
@@ -134,12 +149,13 @@ class GlobalDeepReadRuntime:
 
         token_tracker.reset()
         retrieved_texts: list[str] = []
+        logger = _ScopedLogger(self._get_logger(), self.run_id, task_id)
 
         answer = run_agent(
             chat_model=self.chat_model,
             doc_index=self.load_index(),
             user_question=question,
-            logger=self._get_logger(),
+            logger=logger,
             max_rounds=self.config.max_rounds,
             temperature=self.config.temperature,
             enable_vector=self.config.enable_vector,

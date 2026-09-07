@@ -35,6 +35,29 @@ class FakeEmbeddingModel:
         return [1.0, 0.0]
 
 
+class ToolCallingChatModel:
+    model_name = "fake-chat"
+    base_url = "local://fake"
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def complete(self, payload, *, logger=None, query_id=""):
+        self.call_count += 1
+        if self.call_count == 1:
+            message = {
+                "content": "",
+                "tool_calls": [{
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {"name": "bm25_search", "arguments": '{"query":"text","scope":"full"}'},
+                }],
+            }
+        else:
+            message = {"content": "answer", "tool_calls": None}
+        return {"choices": [{"message": message}], "usage": {}}
+
+
 class ProviderBoundaryTest(unittest.TestCase):
     def test_agent_receives_chat_capability_without_credentials(self) -> None:
         index = DocIndex(
@@ -76,6 +99,24 @@ class ProviderBoundaryTest(unittest.TestCase):
 
         self.assertEqual(result["error"], "embedding_dimension_mismatch")
         self.assertEqual(result["expected"], 3)
+
+    def test_tool_result_repeats_explicit_call_id_in_raw_trace(self) -> None:
+        index = DocIndex(
+            [{"id": "n1", "doc_id": "1", "title": "Title", "paragraphs": ["text"], "children": []}],
+            neighbor_window=None,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            trace_path = Path(directory) / "trace.jsonl"
+            run_agent(
+                chat_model=ToolCallingChatModel(),
+                doc_index=index,
+                user_question="question",
+                logger=JsonlLogger(str(trace_path)),
+                max_rounds=2,
+            )
+            events = [json.loads(line) for line in trace_path.read_text().splitlines()]
+        result_event = next(event for event in events if event["event"] == "tool_result")
+        self.assertEqual(result_event["tool_call_id"], "call-1")
 
 
 if __name__ == "__main__":

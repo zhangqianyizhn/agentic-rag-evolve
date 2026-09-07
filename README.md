@@ -57,6 +57,7 @@ Markdown ingestion + 最小 DeepRead runtime + 隔离 gold label 的 DocumentQA 
 uv run python runner/validate_reference.py --store <store_index> --run <historical_run>
 uv run python runner/run_deepread.py --dataset <dataset.jsonl> --store <store_index> --output <empty_run_dir>
 uv run python runner/evaluate_deepread.py --dataset <dataset.jsonl> --predictions <predictions.jsonl> --output <empty_eval_dir> --judge
+uv run python runner/compile_trajectory.py --trace <deepread_trace.jsonl> --predictions <predictions.jsonl> --output <empty_trajectory_dir>
 ```
 
-模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)。
+模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)，事件与轨迹协议见 [DeepRead trajectory](docs/trajectory.md)。

@@ -37,8 +37,10 @@
 
 对应 HarnessFix 的 trajectory、sanitizer 和 HTIR 构建，但重新定义为文档 QA 轨迹。
 
-- 检查 v0 现有 `llm_request/response`、`tool_call/result`、`final_answer` 事件；
-- 增加稳定 run/task/event ID 和 source ref；
+- [x] 检查 v0 现有 `llm_request/response`、`tool_call/result`、`final_answer` 事件；
+- [x] 增加稳定 run/task/event ID；
+- [x] 建立保留 raw JSONL 的 task-level trajectory compiler；
+- 增加 corpus source ref；
 - 表示文档结构加载、检索候选、read 和最终证据覆盖；
 - 处理并发乱序、重试、缺失事件和大结果裁剪。
 

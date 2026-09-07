@@ -6,6 +6,7 @@
 | `data/gaia_*` | `benchmarks/<dataset>/`（计划） | 同时保存统一 DocumentQA adapter 和冻结 split，不提交大型原始文档。 |
 | `task_agent/run_gaia.sh`、`run_gaia_entry.py` | `runner/run_deepread.py` | Python 主入口已从 DeepRead target 外部注入 provider 和 candidate。 |
 | `eval/eval_gaia.py` | `src/agentic_rag_evolve/evaluation/` | 保留独立 evaluator，但 FinanceBench 使用 token F1、evidence recall 和可注入的 0–4 LLM judge。 |
+| 各 task agent 的 `.traj.json` | raw `deepread_trace.jsonl` + `trajectory/` compiler | 不强迫 DeepRead 直接输出通用轨迹；保留 raw 事实源，再生成带父子关系的 task-level 视图。 |
 | `failure_analysis/` | `evolution/diagnosis`、`evolution/planning`（计划） | 不复用 GAIA 的固定失败类别和 HTIR。 |
 | `enhancement_implementation/` | `evolution/repair`（计划） | 允许修改 agent、检索、索引与 prompt，范围由每次计划决定。 |
 | `run_pipeline_gaia.py` | `run_pipeline_deepread.py`（后期） | 等各模块稳定后再编写总编排，避免先形成一个特化的大脚本。 |

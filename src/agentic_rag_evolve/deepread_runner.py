@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import hashlib
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -78,6 +79,8 @@ def run_financebench(
             raise ValueError("limit must be at least 1")
         queries = queries[:limit]
 
+    created_at = datetime.now(timezone.utc)
+    run_id = f"run_{created_at.strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
     trace_path = output_path / "deepread_trace.jsonl"
     runtime = GlobalDeepReadRuntime(
         store_path,
@@ -86,12 +89,14 @@ def run_financebench(
         chat_model=providers.chat,
         embedding_model=providers.embedding,
         reranker=providers.reranker,
+        run_id=run_id,
     )
     runtime.load_index()
 
     manifest = {
         "schema_version": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
+        "created_at": created_at.isoformat(),
         "dataset_file": Path(dataset_path).name,
         "dataset_sha256": _sha256_file(dataset_path),
         "store_name": Path(store_path).name,
@@ -114,9 +119,10 @@ def run_financebench(
         for query in queries:
             started = time.perf_counter()
             try:
-                result = runtime.query(query.question)
+                result = runtime.query(query.question, task_id=query.task_id)
                 record = {
                     **asdict(query),
+                    "run_id": run_id,
                     "status": "ok",
                     "answer": result.answer,
                     "retrieved_texts": list(result.retrieved_texts),

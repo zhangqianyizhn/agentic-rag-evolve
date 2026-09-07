@@ -77,6 +77,13 @@ class DeepReadRunnerTest(unittest.TestCase):
             self.assertNotIn(str(root), manifest_text)
             self.assertIn("dataset_sha256", manifest_text)
             self.assertTrue((output / "deepread_trace.jsonl").is_file())
+            trace_event = json.loads(
+                (output / "deepread_trace.jsonl").read_text(encoding="utf-8").splitlines()[0]
+            )
+            manifest = json.loads(manifest_text)
+            self.assertEqual(trace_event["task_id"], "q1")
+            self.assertEqual(trace_event["run_id"], manifest["run_id"])
+            self.assertEqual(trace_event["event_id"], "event_000001")
 
 
 if __name__ == "__main__":

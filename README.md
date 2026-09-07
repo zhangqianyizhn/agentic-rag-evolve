@@ -22,7 +22,11 @@ systems/deepread/
   runtime.py                # 从 fb8a301 提取的 standalone global runtime
   baseline.lock.json        # DeepRead 与 ruc-ov-eval 来源 revision
   PROVENANCE.md             # 快照规则与下一步提取边界
-src/agentic_rag_evolve/     # 新框架代码（后续逐模块增加）
+src/agentic_rag_evolve/
+  providers/                # target 不可见的模型配置、鉴权与传输实现
+  deepread_runner.py        # 稳定单数据集执行协议
+  reference_validation.py  # golden store/run 只读校验
+runner/                     # 框架 CLI；不属于被进化的 DeepRead
 docs/
   architecture.md           # 当前阶段架构与代码归属
   roadmap.md                # 渐进实施顺序

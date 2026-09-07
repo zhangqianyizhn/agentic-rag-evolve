@@ -23,7 +23,10 @@
 - [x] 建立 Markdown-only ingestion 和可注入 embedding provider 协议；
 - [x] 从 active baseline 移除 OCR/PDF 运行路径；
 - [x] 实现历史配置使用的 Volcengine multimodal embedding adapter；
-- 建立 `run_deepread.py`，一次运行输出 manifest、predictions 和逐问题 trace；
+- [x] 将 chat、embedding、rerank 的鉴权和传输实现移出 DeepRead target；
+- [x] 移除 target 内部重复 CLI，建立框架级 `run_deepread.py`；
+- [x] 一次运行输出 manifest、predictions、summary 和逐问题 trace；
+- [x] 建立历史 store/run 的只读结构校验；
 - 建立不依赖 DeepRead 内部实现的 evaluator；
 - 用 5–10 个 FinanceBench 问题 smoke test。
 

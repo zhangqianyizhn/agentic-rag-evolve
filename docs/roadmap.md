@@ -18,8 +18,9 @@
 
 对应 HarnessFix 的 `task_agent/open_deep_research + run_gaia_entry.py + eval_gaia.py`。
 
-- 定义最小 `DocumentQATask` 和运行配置；
-- 从历史 `deepread_store.py` 提取 DeepRead runtime/ingest 逻辑；
+- [x] 定义不携带 gold label 的最小 `DocumentQATask` 和独立 `EvaluationReference`；
+- [x] 从历史 `deepread_store.py` 提取可加载既有 corpus 的 global query runtime；
+- [ ] 提取 PDF/Markdown ingestion 和 embedding provider；
 - 建立 `run_deepread.py`，一次运行输出 manifest、predictions 和逐问题 trace；
 - 建立不依赖 DeepRead 内部实现的 evaluator；
 - 用 5–10 个 FinanceBench 问题 smoke test。

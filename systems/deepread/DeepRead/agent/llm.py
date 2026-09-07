@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 import tiktoken
-from src.core.token_tracer_util import token_tracker as _token_tracker
+from ..runtime_state import token_tracker as _token_tracker
 
 def count_tokens(text: str) -> int:
     enc = tiktoken.get_encoding("cl100k_base")
@@ -179,4 +179,3 @@ def http_chat_completions(
             raise
 
     return {}
-

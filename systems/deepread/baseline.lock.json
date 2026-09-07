@@ -3,7 +3,8 @@
   "deepread": {
     "repository": "git@github.com:zhangqianyizhn/DeepRead.git",
     "revision": "7fe3ba23f81d88ee83552ba7f38cd6cc25e6c1eb",
-    "snapshot_path": "systems/deepread/DeepRead"
+    "snapshot_path": "systems/deepread/DeepRead",
+    "exact_snapshot_commit": "4c74375"
   },
   "ruc_ov_eval": {
     "repository": "git@github.com:g121370451/ruc-ov-eval.git",

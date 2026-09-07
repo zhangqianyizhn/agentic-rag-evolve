@@ -14,7 +14,6 @@ store:
   enable_semantic: false
   neighbor_window: "1,-1"
   max_rounds: 50
-  use_pymupdf: true
 
 execution:
   max_workers: 1
@@ -32,3 +31,4 @@ llm:
 notes:
   - Relative data and output paths are intentionally omitted until the new workspace layout is defined.
   - The plaintext credential present in the historical file was intentionally not copied.
+  - The historical use_pymupdf field is omitted because this baseline accepts prepared Markdown only.

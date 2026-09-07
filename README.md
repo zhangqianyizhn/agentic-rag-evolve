@@ -17,7 +17,8 @@
 
 ```text
 systems/deepread/
-  DeepRead/                 # 7fe3ba2 的原样源码快照
+  DeepRead/                 # 以 7fe3ba2 为来源的工作源码
+  ingestion.py              # 唯一 active 的 Markdown ingestion
   runtime.py                # 从 fb8a301 提取的 standalone global runtime
   baseline.lock.json        # DeepRead 与 ruc-ov-eval 来源 revision
   PROVENANCE.md             # 快照规则与下一步提取边界
@@ -34,7 +35,7 @@ docs/
 ```text
 历史源码冻结
     ↓
-最小 DeepRead runtime + 隔离 gold label 的 DocumentQA 协议
+Markdown ingestion + 最小 DeepRead runtime + 隔离 gold label 的 DocumentQA 协议
     ↓
 单数据集 runner / evaluator / trace
     ↓

@@ -20,7 +20,9 @@
 
 - [x] 定义不携带 gold label 的最小 `DocumentQATask` 和独立 `EvaluationReference`；
 - [x] 从历史 `deepread_store.py` 提取可加载既有 corpus 的 global query runtime；
-- [ ] 提取 PDF/Markdown ingestion 和 embedding provider；
+- [x] 建立 Markdown-only ingestion 和可注入 embedding provider 协议；
+- [x] 从 active baseline 移除 OCR/PDF 运行路径；
+- [x] 实现历史配置使用的 Volcengine multimodal embedding adapter；
 - 建立 `run_deepread.py`，一次运行输出 manifest、predictions 和逐问题 trace；
 - 建立不依赖 DeepRead 内部实现的 evaluator；
 - 用 5–10 个 FinanceBench 问题 smoke test。

@@ -15,7 +15,7 @@ AgenticRAGEvolve 不再被定义为只读取外部 ruc-ov 的“控制面”。�
 
 基线固定为 DeepRead `7fe3ba23...` 和 ruc-ov-eval `fb8a301c...`。后续已有的 session pagination、跨轮去重、停滞提示等能力应被视为未来可能重新发现或引入的改进，不能出现在 v0 中。
 
-`systems/deepread/DeepRead/` 当前是 DeepRead 提交的原样快照。在完成行为对齐前，不对这份源码做整理式重构。ruc-ov-eval 中属于 DeepRead runtime 的逻辑将逐项迁入相邻模块，并记录原文件、原 revision 和迁移理由。
+`systems/deepread/DeepRead/` 以原样快照为起点；精确内容保存在 AgenticRAGEvolve commit `4c74375`。工作版本通过独立提交进行必要的边界整理，ruc-ov-eval 中属于 DeepRead runtime 的逻辑则逐项迁入相邻模块，并记录原文件、原 revision 和迁移理由。
 
 ## 3. 暂定职责边界
 
@@ -31,7 +31,7 @@ AgenticRAGEvolve 不再被定义为只读取外部 ruc-ov 的“控制面”。�
 - agent loop、prompt、工具 schema、上下文组织和停止条件；
 - DeepRead 运行配置及必要 telemetry。
 
-索引建立不是评测辅助代码，因为分片、标题和层级结构直接决定检索效果。
+索引建立不是评测辅助代码，因为分片、标题和层级结构直接决定检索效果。所有 benchmark 已提供 Markdown，因此 v0 的 active ingestion 只接受 `.md`/`.markdown`；OCR、PDF 解析及其服务配置不进入当前 baseline，也暂不作为进化目标。
 
 ### Benchmark
 

@@ -8,26 +8,14 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Sequence
 
 import numpy as np
 
 from agentic_rag_evolve.contracts import DocumentInput
 
 from .DeepRead.index import parse_markdown_to_corpus
-
-
-class EmbeddingProvider(Protocol):
-    """Minimal embedding boundary used by ingestion.
-
-    Provider-specific clients and credentials stay outside the corpus builder.
-    """
-
-    model_name: str
-    base_url: str
-    normalized: bool
-
-    def embed(self, text: str) -> Sequence[float]: ...
+from .DeepRead.ports import EmbeddingModel
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +56,7 @@ def _embedding_inputs(corpus: dict) -> tuple[list[str], list[dict[str, object]]]
 class MarkdownIngestor:
     """Build the flat corpus layout expected by ``GlobalDeepReadRuntime``."""
 
-    def __init__(self, store_path: Path, embedder: EmbeddingProvider | None = None) -> None:
+    def __init__(self, store_path: Path, embedder: EmbeddingModel | None = None) -> None:
         self.store_path = Path(store_path)
         self.embedder = embedder
 

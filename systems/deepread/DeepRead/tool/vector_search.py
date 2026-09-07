@@ -1,35 +1,11 @@
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import requests
 
+from ..ports import EmbeddingModel
 from .utils import _round_score
-
-
-def http_embeddings(
-    api_key: Optional[str],
-    base_url: Optional[str],
-    model: str,
-    inputs: List[str],
-    timeout: int = 120,
-) -> List[List[float]]:
-    if not api_key:
-        raise RuntimeError("Please set EMBED_API_KEY (or pass embed_api_key)")
-    url = (base_url or "https://api.openai.com/v1").rstrip("/") + "/embeddings"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    payload = {"model": model, "input": inputs}
-    resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-    resp.raise_for_status()
-    data = resp.json()
-    arr: List[List[float]] = []
-    for item in data.get("data", []):
-        emb = item.get("embedding")
-        if isinstance(emb, list):
-            arr.append(emb)
-    return arr
 
 
 def vector_search(
@@ -39,42 +15,26 @@ def vector_search(
     doc_id: Optional[str] = None,
     top_k: int = 2,
     include_images: bool = True,
-    embed_api_key: Optional[str] = None,
-    embed_base_url: Optional[str] = None,
-    embed_model: Optional[str] = None,
+    embedding_model: EmbeddingModel | None = None,
     neighbor_window: Optional[Tuple[int, int]] = None,
-    use_doubao_embedder: Optional[bool] = True,
 ) -> Dict[str, Any]:
     if not query:
         return {"ok": False, "error": "empty query"}
     if doc_index._vec_matrix is None or not len(doc_index._vec_idmap):
         return {"ok": False, "error": "vector_store not available"}
+    if embedding_model is None:
+        return {"ok": False, "error": "embedding_model not configured"}
 
-    model_name = embed_model or os.getenv("EMBEDDING_MODEL", doc_index._vec_model_name or "Qwen/Qwen3-Embedding-8B")
-    api_key = embed_api_key or os.getenv("EMBED_API_KEY")
-    base_url = (embed_base_url or os.getenv("EMBED_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-
-    if use_doubao_embedder:
-        def _http_embed(model: str, inputs: List[str]) -> List[List[float]]:
-            import requests
-
-            url = embed_base_url
-            headers = {"Content-Type": "application/json"}
-            if embed_api_key:
-                headers["Authorization"] = f"Bearer {embed_api_key}"
-            payload = {"model": model, "input": [{"type":"text", "text": t} for t in inputs]}
-            resp = requests.post(url, headers=headers, json=payload, timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
-            # print(data)
-            return [data.get("data").get("embedding")]
-        q_list = _http_embed(model=model_name, inputs=[query])
-    else:
-        q_list = http_embeddings(api_key=api_key, base_url=base_url, model=model_name, inputs=[query])
-    if not q_list:
+    q_vec = np.asarray(embedding_model.embed(query), dtype=np.float32)
+    if q_vec.ndim != 1 or not q_vec.size:
         return {"ok": False, "error": "embedding_failed"}
-
-    q_vec = np.asarray(q_list[0], dtype=np.float32)
+    if q_vec.shape[0] != doc_index._vec_matrix.shape[1]:
+        return {
+            "ok": False,
+            "error": "embedding_dimension_mismatch",
+            "expected": int(doc_index._vec_matrix.shape[1]),
+            "actual": int(q_vec.shape[0]),
+        }
     q_norm = float(np.linalg.norm(q_vec)) + 1e-12
 
     idxs = list(range(len(doc_index._vec_idmap)))

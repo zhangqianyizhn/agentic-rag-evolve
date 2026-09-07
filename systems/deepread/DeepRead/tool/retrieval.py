@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from ..ports import EmbeddingModel, Reranker
 from .bm25_search import bm25_search
 from .hybrid_search import hybrid_search
 from .read_section import read_section
@@ -239,9 +240,7 @@ class DocIndex:
         doc_id: Optional[str] = None,
         top_k: int = 2,
         include_images: bool = True,
-        embed_api_key: Optional[str] = None,
-        embed_base_url: Optional[str] = None,
-        embed_model: Optional[str] = None,
+        embedding_model: EmbeddingModel | None = None,
         neighbor_window: Optional[Tuple[int, int]] = None,
     ) -> Dict[str, Any]:
         return vector_search(
@@ -251,9 +250,7 @@ class DocIndex:
             doc_id,
             top_k,
             include_images,
-            embed_api_key,
-            embed_base_url,
-            embed_model,
+            embedding_model,
             neighbor_window,
         )
 
@@ -268,9 +265,7 @@ class DocIndex:
         top_k_bm25: int = 20,
         top_k_vec: int = 20,
         include_images: bool = True,
-        embed_api_key: Optional[str] = None,
-        embed_base_url: Optional[str] = None,
-        embed_model: Optional[str] = None,
+        embedding_model: EmbeddingModel | None = None,
         neighbor_window: Optional[Tuple[int, int]] = None,
     ) -> Dict[str, Any]:
         return hybrid_search(
@@ -284,9 +279,7 @@ class DocIndex:
             top_k_bm25,
             top_k_vec,
             include_images,
-            embed_api_key,
-            embed_base_url,
-            embed_model,
+            embedding_model,
             neighbor_window,
         )
 
@@ -301,12 +294,8 @@ class DocIndex:
         stage1_hybrid_topk_bm25: int = 50,
         stage1_hybrid_topk_vec: int = 50,
         include_images: bool = True,
-        embed_api_key: Optional[str] = None,
-        embed_base_url: Optional[str] = None,
-        embed_model: Optional[str] = None,
-        rerank_api_key: Optional[str] = None,
-        rerank_base_url: str = "https://api.siliconflow.cn/v1",
-        rerank_model: str = "Qwen/Qwen3-Reranker-8B",
+        embedding_model: EmbeddingModel | None = None,
+        reranker: Reranker | None = None,
         neighbor_window: Optional[Tuple[int, int]] = None,
         hybrid_bm25_weight: float = 0.5,
         hybrid_vector_weight: float = 0.5,
@@ -322,12 +311,8 @@ class DocIndex:
             stage1_hybrid_topk_bm25,
             stage1_hybrid_topk_vec,
             include_images,
-            embed_api_key,
-            embed_base_url,
-            embed_model,
-            rerank_api_key,
-            rerank_base_url,
-            rerank_model,
+            embedding_model,
+            reranker,
             neighbor_window,
             hybrid_bm25_weight,
             hybrid_vector_weight,

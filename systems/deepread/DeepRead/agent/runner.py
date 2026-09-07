@@ -7,25 +7,23 @@ from typing import Any, Dict, List, Optional, Tuple
 from .llm import (
     _preview_messages,
     _preview_tool_calls,
-    http_chat_completions,
     sanitize_for_vllm,
     should_sanitize_for_vllm,
 )
+from ..ports import ChatModel, EmbeddingModel, Reranker
 from ..prompt.system import build_system_prompt
+from ..runtime_state import token_tracker
 from ..tool.fallback import fallback_tool_calls_from_text, strip_function_calls_block_any, strip_inline_tool_calls
 from ..tool.schema import make_tools_schema
 
 
 def run_agent(
-    model: str,
-    base_url: Optional[str],
+    chat_model: ChatModel,
     doc_index: DocIndex,
     user_question: str,
     logger: JsonlLogger,
     max_rounds: int = 50,
     temperature: float = 0.0,
-    api_key: Optional[str] = None,
-    default_headers: Optional[Dict[str, str]] = None,
     enable_multimodal: bool = False,
     enable_vector: bool = False,
     enable_hybrid: bool = False,
@@ -33,9 +31,7 @@ def run_agent(
     disable_bm25: bool = False,
     disable_regex: bool = False,
     disable_read: bool = False,
-    embed_api_key: Optional[str] = None,
-    embed_base_url: Optional[str] = None,
-    embedding_model: Optional[str] = None,
+    embedding_model: EmbeddingModel | None = None,
     neighbor_window: Optional[Tuple[int, int]] = None,
     bm25_topk: int = 1,
     regex_topk: int = 1,
@@ -50,9 +46,7 @@ def run_agent(
     semantic_topk2: int = 1,
     semantic_stage1_hybrid_topk_bm25: int = 30,
     semantic_stage1_hybrid_topk_vec: int = 30,
-    rerank_api_key: Optional[str] = None,
-    rerank_base_url: str = "https://api.siliconflow.cn/v1",
-    rerank_model: str = "Qwen/Qwen3-Reranker-8B",
+    reranker: Reranker | None = None,
     tool_fallback: bool = True,
     enable_reasoning: bool = True,
     collected_texts: Optional[List[str]] = None,
@@ -79,13 +73,13 @@ def run_agent(
     messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_question}]
     prev_msg_count = 1
 
-    do_sanitize = should_sanitize_for_vllm(base_url)
+    do_sanitize = should_sanitize_for_vllm(chat_model.base_url)
 
     effective_neighbor_window: Optional[Tuple[int, int]] = neighbor_window if neighbor_window is not None else doc_index.neighbor_window
 
     for round_id in range(1, max_rounds + 1):
         req_payload: Dict[str, Any] = {
-            "model": model,
+            "model": chat_model.model_name,
             "messages": messages,
             "tools": tools,
             "tool_choice": "auto",
@@ -94,13 +88,22 @@ def run_agent(
             "include_reasoning": bool(enable_reasoning),
         }
 
-        logger.log("llm_request", query_id=query_id, round=round_id, base_url=base_url, context_delta_preview=_preview_messages(messages[prev_msg_count:]))
+        logger.log("llm_request", query_id=query_id, round=round_id, base_url=chat_model.base_url, context_delta_preview=_preview_messages(messages[prev_msg_count:]))
         prev_msg_count = len(messages)
 
         payload_to_send = sanitize_for_vllm(req_payload, allow_tools=True) if do_sanitize else req_payload
 
         try:
-            resp = http_chat_completions(query_id=query_id, api_key=api_key, base_url=base_url, payload=payload_to_send, default_headers=default_headers, logger=logger)
+            resp = dict(chat_model.complete(
+                payload_to_send,
+                query_id=query_id,
+                logger=logger,
+            ))
+            usage = resp.get("usage") or {}
+            token_tracker.add(
+                int(usage.get("prompt_tokens") or 0),
+                int(usage.get("completion_tokens") or 0),
+            )
         except Exception as exc:
             logger.log("llm_http_error", query_id=query_id, error=str(exc), round=round_id)
             resp = {}
@@ -228,9 +231,7 @@ def run_agent(
                         doc_id=args.get("doc_id"),
                         top_k=int(vector_topk),
                         include_images=enable_multimodal,
-                        embed_api_key=embed_api_key,
-                        embed_base_url=embed_base_url,
-                        embed_model=embedding_model,
+                        embedding_model=embedding_model,
                         neighbor_window=effective_neighbor_window,
                     )
                 elif tool_name == "hybrid_search":
@@ -244,9 +245,7 @@ def run_agent(
                         top_k_bm25=int(hybrid_topk_bm25),
                         top_k_vec=int(hybrid_topk_vec),
                         include_images=enable_multimodal,
-                        embed_api_key=embed_api_key,
-                        embed_base_url=embed_base_url,
-                        embed_model=embedding_model,
+                        embedding_model=embedding_model,
                         neighbor_window=effective_neighbor_window,
                     )
                 elif tool_name == "semantic_retrieval":
@@ -260,12 +259,8 @@ def run_agent(
                         stage1_hybrid_topk_bm25=int(semantic_stage1_hybrid_topk_bm25),
                         stage1_hybrid_topk_vec=int(semantic_stage1_hybrid_topk_vec),
                         include_images=enable_multimodal,
-                        embed_api_key=embed_api_key,
-                        embed_base_url=embed_base_url,
-                        embed_model=embedding_model,
-                        rerank_api_key=rerank_api_key,
-                        rerank_base_url=rerank_base_url,
-                        rerank_model=rerank_model,
+                        embedding_model=embedding_model,
+                        reranker=reranker,
                         neighbor_window=effective_neighbor_window,
                         hybrid_bm25_weight=float(hybrid_bm25_weight),
                         hybrid_vector_weight=float(hybrid_vector_weight),

@@ -46,7 +46,7 @@ class MarkdownIngestionTest(unittest.TestCase):
             runtime = GlobalDeepReadRuntime(
                 store,
                 root / "trace.jsonl",
-                DeepReadConfig("test-model", "https://example.invalid/v1", "unused"),
+                DeepReadConfig(),
             )
             self.assertEqual(runtime.load_index().doc_id_map, {"1": "report"})
 

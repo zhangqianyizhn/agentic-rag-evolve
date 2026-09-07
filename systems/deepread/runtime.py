@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .DeepRead.agent import JsonlLogger, run_agent
+from .DeepRead.ports import ChatModel, EmbeddingModel, Reranker
 from .DeepRead.runtime_state import token_tracker
 from .DeepRead.tool import DocIndex, load_corpus
 from .DeepRead.tool.utils import _normalize_neighbor_window
@@ -16,9 +17,6 @@ from .DeepRead.tool.utils import _normalize_neighbor_window
 
 @dataclass(frozen=True, slots=True)
 class DeepReadConfig:
-    model: str
-    base_url: str
-    api_key: str
     temperature: float = 0.0
     enable_vector: bool = True
     enable_hybrid: bool = False
@@ -26,16 +24,8 @@ class DeepReadConfig:
     neighbor_window: tuple[int, int] | None = (1, -1)
     max_rounds: int = 50
     retrieval_topk: int = 5
-    embedding_model: str = "doubao-embedding-vision-250615"
-    embedding_base_url: str = (
-        "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal"
-    )
 
     def __post_init__(self) -> None:
-        if not self.model.strip():
-            raise ValueError("model must not be empty")
-        if not self.base_url.strip():
-            raise ValueError("base_url must not be empty")
         if self.max_rounds < 1:
             raise ValueError("max_rounds must be at least 1")
         if self.retrieval_topk < 1:
@@ -70,10 +60,22 @@ class GlobalDeepReadRuntime:
     therefore deferred until it can be introduced as an explicit migration.
     """
 
-    def __init__(self, store_path: Path, trace_path: Path, config: DeepReadConfig) -> None:
+    def __init__(
+        self,
+        store_path: Path,
+        trace_path: Path,
+        config: DeepReadConfig,
+        *,
+        chat_model: ChatModel | None = None,
+        embedding_model: EmbeddingModel | None = None,
+        reranker: Reranker | None = None,
+    ) -> None:
         self.store_path = Path(store_path)
         self.trace_path = Path(trace_path)
         self.config = config
+        self.chat_model = chat_model
+        self.embedding_model = embedding_model
+        self.reranker = reranker
         self._logger: JsonlLogger | None = None
         self._logger_lock = threading.Lock()
         self._doc_index: DocIndex | None = None
@@ -127,28 +129,27 @@ class GlobalDeepReadRuntime:
         question = question.strip()
         if not question:
             raise ValueError("question must not be empty")
+        if self.chat_model is None:
+            raise RuntimeError("chat_model is required to execute a query")
 
         token_tracker.reset()
         retrieved_texts: list[str] = []
 
         answer = run_agent(
-            model=self.config.model,
-            base_url=self.config.base_url,
+            chat_model=self.chat_model,
             doc_index=self.load_index(),
             user_question=question,
             logger=self._get_logger(),
             max_rounds=self.config.max_rounds,
             temperature=self.config.temperature,
-            api_key=self.config.api_key,
             enable_vector=self.config.enable_vector,
             enable_hybrid=self.config.enable_hybrid,
             enable_semantic=self.config.enable_semantic,
             disable_bm25=False,
             disable_regex=False,
             disable_read=False,
-            embed_api_key=self.config.api_key,
-            embed_base_url=self.config.embedding_base_url,
-            embedding_model=self.config.embedding_model,
+            embedding_model=self.embedding_model,
+            reranker=self.reranker,
             neighbor_window=self.config.neighbor_window,
             bm25_topk=self.config.retrieval_topk,
             regex_topk=self.config.retrieval_topk,

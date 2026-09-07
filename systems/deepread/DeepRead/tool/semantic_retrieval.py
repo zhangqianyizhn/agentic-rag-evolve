@@ -1,39 +1,9 @@
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
-
+from ..ports import EmbeddingModel, Reranker
 from .utils import _round_score
-
-
-def http_rerank(
-    query: str,
-    documents: List[str],
-    api_key: Optional[str],
-    base_url: str = "https://api.siliconflow.cn/v1",
-    model: str = "Qwen/Qwen3-Reranker-8B",
-    top_n: int = -1,
-    return_documents: bool = True,
-    max_chunks_per_doc: int = 1024,
-    timeout: int = 120,
-) -> Dict[str, Any]:
-    if not api_key:
-        raise RuntimeError("Please set SILICONFLOW_API_KEY (or pass rerank_api_key)")
-    url = base_url.rstrip("/") + "/rerank"
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": model,
-        "query": query,
-        "documents": documents,
-        "top_n": top_n,
-        "return_documents": return_documents,
-        "max_chunks_per_doc": max_chunks_per_doc,
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()
 
 
 def _with_neighbors(
@@ -84,12 +54,8 @@ def semantic_retrieval(
     stage1_hybrid_topk_bm25: int = 50,
     stage1_hybrid_topk_vec: int = 50,
     include_images: bool = True,
-    embed_api_key: Optional[str] = None,
-    embed_base_url: Optional[str] = None,
-    embed_model: Optional[str] = None,
-    rerank_api_key: Optional[str] = None,
-    rerank_base_url: str = "https://api.siliconflow.cn/v1",
-    rerank_model: str = "Qwen/Qwen3-Reranker-8B",
+    embedding_model: EmbeddingModel | None = None,
+    reranker: Reranker | None = None,
     neighbor_window: Optional[Tuple[int, int]] = None,
     hybrid_bm25_weight: float = 0.5,
     hybrid_vector_weight: float = 0.5,
@@ -127,9 +93,7 @@ def semantic_retrieval(
             top_k_bm25=max(k1, int(stage1_hybrid_topk_bm25)),
             top_k_vec=max(k1, int(stage1_hybrid_topk_vec)),
             include_images=False,
-            embed_api_key=embed_api_key,
-            embed_base_url=embed_base_url,
-            embed_model=embed_model,
+            embedding_model=embedding_model,
             neighbor_window=no_neighbor,
         )
     else:
@@ -139,9 +103,7 @@ def semantic_retrieval(
             doc_id=doc_id,
             top_k=k1,
             include_images=False,
-            embed_api_key=embed_api_key,
-            embed_base_url=embed_base_url,
-            embed_model=embed_model,
+            embedding_model=embedding_model,
             neighbor_window=no_neighbor,
         )
 
@@ -172,18 +134,10 @@ def semantic_retrieval(
             "results": [],
         }
 
-    rerank_key = rerank_api_key or os.getenv("SILICONFLOW_API_KEY") or os.getenv("RERANK_API_KEY")
     try:
-        rerank_data = http_rerank(
-            query=query,
-            documents=docs,
-            api_key=rerank_key,
-            base_url=rerank_base_url,
-            model=rerank_model,
-            top_n=-1,
-            return_documents=True,
-            max_chunks_per_doc=1024,
-        )
+        if reranker is None:
+            raise RuntimeError("reranker not configured")
+        rerank_data = reranker.rerank(query, docs, top_n=-1)
     except Exception as exc:
         hits = [
             _with_neighbors(
@@ -240,6 +194,6 @@ def semantic_retrieval(
         "top_k1": k1,
         "top_k2": k2,
         "rerank_ok": True,
-        "rerank_model": rerank_model,
+        "rerank_model": reranker.model_name,
         "results": hits,
     }

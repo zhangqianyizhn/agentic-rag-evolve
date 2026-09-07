@@ -2,8 +2,8 @@ import math
 import unittest
 from types import SimpleNamespace
 
-from systems.deepread.providers import (
-    VolcengineMultimodalEmbeddingProvider,
+from agentic_rag_evolve.providers import (
+    VolcengineMultimodalEmbeddingModel,
     truncate_and_normalize,
 )
 
@@ -27,7 +27,7 @@ class EmbeddingProviderTest(unittest.TestCase):
     def test_uses_multimodal_text_payload(self) -> None:
         endpoint = FakeMultimodalEmbeddings()
         client = SimpleNamespace(multimodal_embeddings=endpoint)
-        provider = VolcengineMultimodalEmbeddingProvider(
+        provider = VolcengineMultimodalEmbeddingModel(
             "embedding-model",
             api_key="",
             base_url="https://example.invalid/v3/",

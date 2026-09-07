@@ -1,0 +1,83 @@
+"""Environment-backed provider configuration for stable runners."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import load_dotenv
+from systems.deepread.DeepRead.ports import ChatModel, EmbeddingModel, Reranker
+
+from .http import OpenAICompatibleChatModel, OpenAICompatibleReranker
+from .volcengine import VolcengineMultimodalEmbeddingModel
+
+
+def _required(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise ValueError(f"missing required provider setting: {name}")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderSettings:
+    llm_model: str
+    llm_base_url: str
+    llm_api_key: str
+    embedding_model: str
+    embedding_base_url: str
+    embedding_api_key: str
+    embedding_dimension: int = 2048
+    rerank_model: str | None = None
+    rerank_base_url: str | None = None
+    rerank_api_key: str | None = None
+
+    @classmethod
+    def from_env(cls, env_file: Path | None = None) -> "ProviderSettings":
+        if env_file is not None:
+            load_dotenv(Path(env_file), override=False)
+        return cls(
+            llm_model=_required("LLM_MODEL"),
+            llm_base_url=_required("LLM_BASE_URL"),
+            llm_api_key=_required("LLM_API_KEY"),
+            embedding_model=_required("EMBEDDING_MODEL_NAME"),
+            embedding_base_url=_required("EMBEDDING_BASE_URL"),
+            embedding_api_key=_required("EMBEDDING_API_KEY"),
+            embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "2048")),
+            rerank_model=os.getenv("RERANK_MODEL") or None,
+            rerank_base_url=os.getenv("RERANK_BASE_URL") or None,
+            rerank_api_key=os.getenv("RERANK_API_KEY") or None,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderBundle:
+    chat: ChatModel
+    embedding: EmbeddingModel
+    reranker: Reranker | None = None
+
+
+def load_provider_bundle(env_file: Path | None = None) -> ProviderBundle:
+    settings = ProviderSettings.from_env(env_file)
+    reranker = None
+    if settings.rerank_model and settings.rerank_base_url and settings.rerank_api_key:
+        reranker = OpenAICompatibleReranker(
+            model_name=settings.rerank_model,
+            base_url=settings.rerank_base_url,
+            api_key=settings.rerank_api_key,
+        )
+    return ProviderBundle(
+        chat=OpenAICompatibleChatModel(
+            model_name=settings.llm_model,
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+        ),
+        embedding=VolcengineMultimodalEmbeddingModel(
+            model_name=settings.embedding_model,
+            base_url=settings.embedding_base_url,
+            api_key=settings.embedding_api_key,
+            dimension=settings.embedding_dimension,
+        ),
+        reranker=reranker,
+    )

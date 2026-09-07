@@ -26,11 +26,7 @@ def _write_corpus(path: Path, title: str) -> None:
 
 class DeepReadRuntimeTest(unittest.TestCase):
     def _config(self) -> DeepReadConfig:
-        return DeepReadConfig(
-            model="test-model",
-            base_url="https://example.invalid/v1",
-            api_key="not-used-by-index-tests",
-        )
+        return DeepReadConfig()
 
     def test_discovers_only_flat_corpora_in_filename_order(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

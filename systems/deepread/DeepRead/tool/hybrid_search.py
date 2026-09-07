@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..ports import EmbeddingModel
 from .utils import _round_score
 
 
@@ -16,9 +17,7 @@ def hybrid_search(
     top_k_bm25: int = 20,
     top_k_vec: int = 20,
     include_images: bool = True,
-    embed_api_key: Optional[str] = None,
-    embed_base_url: Optional[str] = None,
-    embed_model: Optional[str] = None,
+    embedding_model: EmbeddingModel | None = None,
     neighbor_window: Optional[Tuple[int, int]] = None,
 ) -> Dict[str, Any]:
     no_neighbor: Optional[Tuple[int, int]] = (0, 0)
@@ -36,9 +35,7 @@ def hybrid_search(
         doc_id=doc_id,
         top_k=top_k_vec,
         include_images=include_images,
-        embed_api_key=embed_api_key,
-        embed_base_url=embed_base_url,
-        embed_model=embed_model,
+        embedding_model=embedding_model,
         neighbor_window=no_neighbor,
     )
 

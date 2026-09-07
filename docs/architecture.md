@@ -19,19 +19,21 @@ AgenticRAGEvolve 不再被定义为只读取外部 ruc-ov 的“控制面”。�
 
 ## 3. 暂定职责边界
 
-### 被进化系统 `systems/deepread`
+### 被进化系统 `systems/deepread/DeepRead`
 
 包含任何会改变 DeepRead 行为或准确率的实现：
 
 - Markdown/corpus 解析和目录树；
-- embedding 与索引建立；
+- embedding 输入选择、分片与索引结构；
 - BM25、regex、vector、hybrid、semantic 检索；
 - global 文档定位和 `get_doc_structure`；
 - `read_section`；
 - agent loop、prompt、工具 schema、上下文组织和停止条件；
-- DeepRead 运行配置及必要 telemetry。
+- agent 行为相关配置。
 
 索引建立不是评测辅助代码，因为分片、标题和层级结构直接决定检索效果。所有 benchmark 已提供 Markdown，因此 v0 的 active ingestion 只接受 `.md`/`.markdown`；OCR、PDF 解析及其服务配置不进入当前 baseline，也暂不作为进化目标。
+
+具体模型 provider 不属于被进化系统。DeepRead 只声明 `ChatModel`、`EmbeddingModel` 和 `Reranker` 能力端口；API key、endpoint、HTTP、重试和厂商 SDK 位于 `src/agentic_rag_evolve/providers/`。这样修复 agent 可以改变检索 query 和候选使用方式，但默认看不到或修改模型传输实现。
 
 ### Benchmark
 
@@ -44,7 +46,7 @@ AgenticRAGEvolve 不再被定义为只读取外部 ruc-ov 的“控制面”。�
 
 ### Runner / Evaluator
 
-Runner 负责用固定协议调用任意 DeepRead candidate，产生 prediction、trajectory、成本和异常记录。Evaluator 只根据任务与输出评分，不导入 DeepRead 内部模块。
+Runner 负责读取 `.env`/运行配置、构造 provider、用固定协议调用任意 DeepRead candidate，并产生 prediction、trajectory、成本和异常记录。Evaluator 只根据任务与输出评分，不导入 DeepRead 内部模块。
 
 ### Evolution
 

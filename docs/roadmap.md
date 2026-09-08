@@ -41,6 +41,7 @@
 - [x] 增加稳定 run/task/event ID；
 - [x] 建立保留 raw JSONL 的 task-level trajectory compiler；
 - [x] 将模型调用和 provider 生命周期 tracing 移出 DeepRead agent loop；
+- [x] 将工具分发提取为 target-owned executor，并用框架 proxy 捕获 call/result；
 - 增加 corpus source ref；
 - 表示文档结构加载、检索候选、read 和最终证据覆盖；
 - 处理并发乱序、重试、缺失事件和大结果裁剪。

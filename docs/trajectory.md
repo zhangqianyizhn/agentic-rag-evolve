@@ -32,13 +32,13 @@
 
 HarnessFix 的 `TracingLiteLLMModel` 与 task-local recorder 证明 wrapper/context 是可行机制；但其 agent 包仍显式导入 tracing，模型构造也显式选择 tracing model，因此不是完全无侵入。
 
-本项目把 JSONL 写入、event ID、run/task scope 和 trajectory 编译放在进化框架的 telemetry/trajectory 层。模型 request/response 由框架的 `TracingChatModel` 自动记录，provider 重试通过 task-local trace context 归属，无需 DeepRead 计算 query hash 或传入 logger。DeepRead 当前只在工具及少数 agent 语义事件上依赖 `EventLogger` 协议，不拥有存储实现。
+本项目把 JSONL 写入、event ID、run/task scope 和 trajectory 编译放在进化框架的 telemetry/trajectory 层。模型 request/response 由框架的 `TracingChatModel` 自动记录，provider 重试通过 task-local trace context 归属，无需 DeepRead 计算 query hash 或传入 logger。工具分发与参数语义由 target 内的 `DeepReadToolExecutor` 负责，框架的 `TracingToolExecutor` 装饰它并自动记录完整 call/result。DeepRead agent loop 只在工具参数恢复、文本调用恢复和终止等少数 agent 语义事件上依赖 `EventLogger` 协议，不拥有存储实现。
 
 后续继续缩小埋点面：
 
 1. [x] 用 chat-model wrapper 捕获模型 request/response、provider 重试和 token 信息；
-2. [ ] 用 tool executor proxy 捕获一次完整的工具交互。
+2. [x] 用 tool executor proxy 捕获一次完整的工具交互。
 
-这两类 wrapper 不能都放进模型 provider：工具执行不是模型传输职责。agent 仅在框架无法可靠推断的语义分支（例如文本恢复出的工具调用）保留极少量 observer hook。
+这两类 wrapper 不能都放进模型 provider：工具执行不是模型传输职责。模型生成的 `tool_call_id` 仍由 agent 放入后续 tool message，这是模型协议本身所需的关联；它由 tracing proxy 消费，不会传给 target 的工具实现。agent 仅在框架无法可靠推断的语义分支（例如文本恢复出的工具调用）保留极少量 observer hook。
 
 HarnessFix 需要统一多个异构 agent 的 trajectory；这里先忠实表示 DeepRead 的检索链路，不采用预设诊断 taxonomy，也不把 raw trace 提前压缩为只服务某类修复算子的格式。

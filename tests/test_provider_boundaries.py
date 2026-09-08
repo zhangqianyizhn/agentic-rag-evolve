@@ -6,8 +6,14 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from agentic_rag_evolve.telemetry import JsonlTraceWriter
+from agentic_rag_evolve.telemetry import (
+    JsonlTraceWriter,
+    TracingChatModel,
+    TracingToolExecutor,
+    trace_context,
+)
 from systems.deepread.DeepRead.agent.runner import run_agent
+from systems.deepread.DeepRead.tool import DeepReadToolExecutor
 from systems.deepread.DeepRead.tool.retrieval import DocIndex
 
 
@@ -69,6 +75,7 @@ class ProviderBoundaryTest(unittest.TestCase):
             answer = run_agent(
                 chat_model=model,
                 doc_index=index,
+                tool_executor=TracingToolExecutor(DeepReadToolExecutor(index)),
                 user_question="question",
                 logger=JsonlTraceWriter(Path(directory) / "trace.jsonl"),
                 max_rounds=1,
@@ -107,16 +114,31 @@ class ProviderBoundaryTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             trace_path = Path(directory) / "trace.jsonl"
-            run_agent(
-                chat_model=ToolCallingChatModel(),
-                doc_index=index,
-                user_question="question",
-                logger=JsonlTraceWriter(trace_path),
-                max_rounds=2,
-            )
+            writer = JsonlTraceWriter(trace_path)
+            with trace_context(writer):
+                run_agent(
+                    chat_model=TracingChatModel(ToolCallingChatModel()),
+                    doc_index=index,
+                    tool_executor=TracingToolExecutor(DeepReadToolExecutor(index)),
+                    user_question="question",
+                    logger=writer,
+                    max_rounds=2,
+                )
             events = [json.loads(line) for line in trace_path.read_text().splitlines()]
         result_event = next(event for event in events if event["event"] == "tool_result")
         self.assertEqual(result_event["tool_call_id"], "call-1")
+        self.assertEqual(
+            [event["event"] for event in events],
+            [
+                "llm_request",
+                "llm_response",
+                "tool_call",
+                "tool_result",
+                "llm_request",
+                "llm_response",
+                "final_answer",
+            ],
+        )
 
 
 if __name__ == "__main__":

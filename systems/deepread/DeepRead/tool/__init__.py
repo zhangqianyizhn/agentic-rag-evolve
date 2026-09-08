@@ -8,11 +8,13 @@ from .fallback import (
     strip_inline_tool_calls,
 )
 from .corpus import load_corpus
+from .executor import DeepReadToolExecutor
 from .retrieval import DocIndex
 from .schema import make_tools_schema
 
 __all__ = [
     "DocIndex",
+    "DeepReadToolExecutor",
     "fallback_tool_calls_from_text",
     "fallback_tool_calls_from_text_inline_json",
     "fallback_tool_calls_from_text_xmlish",

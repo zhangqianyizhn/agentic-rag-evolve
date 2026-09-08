@@ -12,13 +12,14 @@ from agentic_rag_evolve.telemetry import (
     JsonlTraceWriter,
     ScopedTraceWriter,
     TracingChatModel,
+    TracingToolExecutor,
     trace_context,
 )
 
 from .DeepRead.agent import run_agent
 from .DeepRead.ports import ChatModel, EmbeddingModel, Reranker
 from .DeepRead.runtime_state import token_tracker
-from .DeepRead.tool import DocIndex, load_corpus
+from .DeepRead.tool import DeepReadToolExecutor, DocIndex, load_corpus
 from .DeepRead.tool.utils import _normalize_neighbor_window
 
 
@@ -148,9 +149,24 @@ class GlobalDeepReadRuntime:
         )
 
         with trace_context(logger):
+            tool_executor = TracingToolExecutor(
+                DeepReadToolExecutor(
+                    doc_index=self.load_index(),
+                    embedding_model=self.embedding_model,
+                    reranker=self.reranker,
+                    neighbor_window=self.config.neighbor_window,
+                    bm25_topk=self.config.retrieval_topk,
+                    regex_topk=self.config.retrieval_topk,
+                    vector_topk=self.config.retrieval_topk,
+                    hybrid_topk=self.config.retrieval_topk,
+                    semantic_topk1=30,
+                    semantic_topk2=1,
+                )
+            )
             answer = run_agent(
                 chat_model=TracingChatModel(self.chat_model),
                 doc_index=self.load_index(),
+                tool_executor=tool_executor,
                 user_question=question,
                 logger=logger,
                 max_rounds=self.config.max_rounds,
@@ -161,15 +177,6 @@ class GlobalDeepReadRuntime:
                 disable_bm25=False,
                 disable_regex=False,
                 disable_read=False,
-                embedding_model=self.embedding_model,
-                reranker=self.reranker,
-                neighbor_window=self.config.neighbor_window,
-                bm25_topk=self.config.retrieval_topk,
-                regex_topk=self.config.retrieval_topk,
-                vector_topk=self.config.retrieval_topk,
-                hybrid_topk=self.config.retrieval_topk,
-                semantic_topk1=30,
-                semantic_topk2=1,
                 collected_texts=retrieved_texts,
             )
         usage = token_tracker.get()

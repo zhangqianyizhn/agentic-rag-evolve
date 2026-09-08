@@ -21,6 +21,18 @@ class ChatModel(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class ToolExecutor(Protocol):
+    """Execute one DeepRead tool decision made by the agent."""
+
+    def execute(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        call_id: str | None = None,
+    ) -> Mapping[str, Any]: ...
+
+
 class EmbeddingModel(Protocol):
     """A text-embedding capability shared by ingestion and query retrieval."""
 

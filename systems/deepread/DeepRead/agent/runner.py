@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .llm import (
     _preview_tool_calls,
     sanitize_for_vllm,
     should_sanitize_for_vllm,
 )
-from ..ports import ChatModel, EmbeddingModel, EventLogger, Reranker
+from ..ports import ChatModel, EventLogger, ToolExecutor
 from ..prompt.system import build_system_prompt
 from ..runtime_state import token_tracker
 from ..tool.fallback import fallback_tool_calls_from_text, strip_function_calls_block_any, strip_inline_tool_calls
@@ -18,6 +18,7 @@ from ..tool.schema import make_tools_schema
 def run_agent(
     chat_model: ChatModel,
     doc_index: DocIndex,
+    tool_executor: ToolExecutor,
     user_question: str,
     logger: EventLogger,
     max_rounds: int = 50,
@@ -29,22 +30,6 @@ def run_agent(
     disable_bm25: bool = False,
     disable_regex: bool = False,
     disable_read: bool = False,
-    embedding_model: EmbeddingModel | None = None,
-    neighbor_window: Optional[Tuple[int, int]] = None,
-    bm25_topk: int = 1,
-    regex_topk: int = 1,
-    vector_topk: int = 1,
-    hybrid_topk: int = 1,
-    hybrid_topk_bm25: int = 30,
-    hybrid_topk_vec: int = 30,
-    hybrid_bm25_weight: float = 0.5,
-    hybrid_vector_weight: float = 0.5,
-    semantic_stage1_method: str = "vector",
-    semantic_topk1: int = 30,
-    semantic_topk2: int = 1,
-    semantic_stage1_hybrid_topk_bm25: int = 30,
-    semantic_stage1_hybrid_topk_vec: int = 30,
-    reranker: Reranker | None = None,
     tool_fallback: bool = True,
     enable_reasoning: bool = True,
     collected_texts: Optional[List[str]] = None,
@@ -69,8 +54,6 @@ def run_agent(
 
     messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_question}]
     do_sanitize = should_sanitize_for_vllm(chat_model.base_url)
-
-    effective_neighbor_window: Optional[Tuple[int, int]] = neighbor_window if neighbor_window is not None else doc_index.neighbor_window
 
     for round_id in range(1, max_rounds + 1):
         req_payload: Dict[str, Any] = {
@@ -164,82 +147,8 @@ def run_agent(
                 logger.log("tool_args_parse_error", tool=tool_name, raw=str(args_raw), error=str(exc))
                 args = {}
 
-            logger.log("tool_call", tool=tool_name, args=args, tool_call_id=tc.get("id"))
-
             try:
-                if tool_name == "get_doc_structure":
-                    raw_ids = args.get("doc_id")
-                    doc_ids = [str(d) for d in raw_ids] if isinstance(raw_ids, list) else None
-                    out = doc_index.get_doc_structure(doc_ids=doc_ids)
-                elif tool_name == "read_section":
-                    out = doc_index.read_section(
-                        doc_id=args.get("doc_id"),
-                        node_id=args.get("node_id"),
-                        start_paragraph=int(args.get("start_paragraph", 0)),
-                        end_paragraph=int(args.get("end_paragraph", -1)),
-                        include_images=enable_multimodal,
-                    )
-                elif tool_name == "bm25_search":
-                    out = doc_index.bm25_search(
-                        query=args.get("query", ""),
-                        scope=args.get("scope", "full"),
-                        doc_id=args.get("doc_id"),
-                        top_k=int(bm25_topk),
-                        include_images=enable_multimodal,
-                        neighbor_window=effective_neighbor_window,
-                    )
-                elif tool_name == "regex_search":
-                    out = doc_index.regex_search(
-                        pattern=args.get("pattern", ""),
-                        scope=args.get("scope", "full"),
-                        doc_id=args.get("doc_id"),
-                        top_k=int(regex_topk),
-                        include_images=enable_multimodal,
-                        neighbor_window=effective_neighbor_window,
-                    )
-                elif tool_name == "vector_search":
-                    out = doc_index.vector_search(
-                        query=args.get("query", ""),
-                        scope=args.get("scope", "full"),
-                        doc_id=args.get("doc_id"),
-                        top_k=int(vector_topk),
-                        include_images=enable_multimodal,
-                        embedding_model=embedding_model,
-                        neighbor_window=effective_neighbor_window,
-                    )
-                elif tool_name == "hybrid_search":
-                    out = doc_index.hybrid_search(
-                        query=args.get("query", ""),
-                        scope=args.get("scope", "full"),
-                        doc_id=args.get("doc_id"),
-                        top_k=int(hybrid_topk),
-                        bm25_weight=float(hybrid_bm25_weight),
-                        vector_weight=float(hybrid_vector_weight),
-                        top_k_bm25=int(hybrid_topk_bm25),
-                        top_k_vec=int(hybrid_topk_vec),
-                        include_images=enable_multimodal,
-                        embedding_model=embedding_model,
-                        neighbor_window=effective_neighbor_window,
-                    )
-                elif tool_name == "semantic_retrieval":
-                    out = doc_index.semantic_retrieval(
-                        query=args.get("query", ""),
-                        scope=args.get("scope", "full"),
-                        doc_id=args.get("doc_id"),
-                        stage1_method=str(semantic_stage1_method),
-                        top_k1=int(semantic_topk1),
-                        top_k2=int(semantic_topk2),
-                        stage1_hybrid_topk_bm25=int(semantic_stage1_hybrid_topk_bm25),
-                        stage1_hybrid_topk_vec=int(semantic_stage1_hybrid_topk_vec),
-                        include_images=enable_multimodal,
-                        embedding_model=embedding_model,
-                        reranker=reranker,
-                        neighbor_window=effective_neighbor_window,
-                        hybrid_bm25_weight=float(hybrid_bm25_weight),
-                        hybrid_vector_weight=float(hybrid_vector_weight),
-                    )
-                else:
-                    out = {"ok": False, "error": f"Tool '{tool_name}' not implemented"}
+                out = dict(tool_executor.execute(tool_name, args, call_id=tc.get("id")))
 
                 messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": json.dumps(out, ensure_ascii=False)})
 
@@ -282,25 +191,9 @@ def run_agent(
                     if mm_items:
                         messages.append({"role": "user", "content": mm_items})
 
-                logger.log(
-                    "tool_result",
-                    tool=tool_name,
-                    tool_call_id=tc.get("id"),
-                    ok=bool(out.get("ok", True)) if isinstance(out, dict) else True,
-                    result=out,
-                )
-
             except Exception as exc:
                 err = {"ok": False, "error": str(exc)}
                 messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": json.dumps(err, ensure_ascii=False)})
-                logger.log(
-                    "tool_result",
-                    tool=tool_name,
-                    tool_call_id=tc.get("id"),
-                    ok=False,
-                    error=str(exc),
-                    result=err,
-                )
 
     logger.log("max_rounds_reached", max_rounds=max_rounds)
     return "(Reached maximum rounds, no final answer generated)"

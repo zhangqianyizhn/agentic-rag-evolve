@@ -52,6 +52,8 @@ Runner 负责读取 `.env`/运行配置、构造 provider、用固定协议调�
 
 在基础执行闭环稳定后再实现：轨迹编译、失败诊断、跨样本归并、改进计划、隔离修改、diff 审计、验证门禁和进化记忆。
 
+诊断 agent 不直接获得 raw trace 或仓库目录。框架先构建 task-level diagnostic bundle，并通过显式 source manifest 与受限 reader 提供按需读取；provider、telemetry、trajectory compiler 和 evaluator 默认不可见。具体协议见 `docs/diagnostic-input.md`。
+
 ## 4. 第一条垂直切片
 
 第一条切片只覆盖一个小型 FinanceBench global 子集：

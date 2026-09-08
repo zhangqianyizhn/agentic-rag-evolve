@@ -164,6 +164,8 @@ def evaluate_financebench(
                 "answer": answer,
                 "error_type": prediction.get("error_type"),
                 "error": prediction.get("error"),
+                "termination_reason": prediction.get("termination_reason"),
+                "rounds_completed": prediction.get("rounds_completed"),
             },
             "retrieval": {
                 "text_count": len(retrieved),

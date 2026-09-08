@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .evidence import analyze_evidence_ladder
 from .policy import DIAGNOSTIC_SOURCE_POLICY, DIAGNOSTIC_TOOL_CONTRACTS
 
 
@@ -203,6 +204,7 @@ def build_diagnostic_bundle(
     trajectory_path: Path,
     evaluation_path: Path,
     run_manifest_path: Path,
+    store_path: Path,
     source_root: Path,
     output_path: Path,
 ) -> DiagnosticBundleReport:
@@ -230,6 +232,13 @@ def build_diagnostic_bundle(
         trajectory_root=Path(trajectory_path).parent,
         output_path=output_path,
     )
+    evidence_coverage = analyze_evidence_ladder(
+        trajectory=trajectory,
+        evaluation=evaluation,
+        store_path=Path(store_path),
+        payload_root=output_path,
+        expected_store_fingerprint=run_manifest.get("store_fingerprint"),
+    )
     sources = _source_manifest(Path(source_root))
     bundle = {
         "schema_version": "deepread-diagnostic-input-v1",
@@ -256,6 +265,7 @@ def build_diagnostic_bundle(
             },
         },
         "evaluation": evaluation,
+        "evidence_coverage": evidence_coverage,
         "trajectory": trajectory,
         "access": {
             "sources": sources,

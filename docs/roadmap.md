@@ -44,8 +44,8 @@
 - [x] 将工具分发提取为 target-owned executor，并用框架 proxy 捕获 call/result；
 - [x] 用 AgentObserver/AgentOutcome 收敛剩余 agent 语义事件和终止状态；
 - [x] 建立诊断输入字段投影、源码 allowlist 和受限 artifact reader；
-- 增加 corpus source ref；
-- 表示文档结构加载、检索候选、read 和最终证据覆盖；
+- [x] 在 evidence ladder 中增加 corpus source ref；
+- [x] 表示检索候选、read 和最终证据覆盖；
 - 处理并发乱序、重试、缺失事件和大结果裁剪。
 
 完成条件：任一答案都可追溯到完整搜索/读取路径，且原始事件不因紧凑视图丢失。
@@ -53,7 +53,7 @@
 ## M3：评测结果和确定性失败信号
 
 - 对齐 generated answer、gold answer、gold evidence 与 trajectory；
-- 计算 evidence-to-corpus、candidate、read、answer 四级覆盖；
+- [x] 计算 evidence-to-corpus、candidate、read、answer 四级覆盖；
 - 区分执行异常、无答案、错误答案和评测可疑样本；
 - 生成可人工审阅的 bad-case 报告。
 

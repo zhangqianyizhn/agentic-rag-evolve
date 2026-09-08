@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agentic_rag_evolve.diagnostics import DiagnosticArtifactReader, build_diagnostic_bundle
+from agentic_rag_evolve.diagnostics import (
+    DiagnosticArtifactReader,
+    build_diagnostic_bundle,
+    store_fingerprint,
+)
 
 
 class DiagnosticBundleTest(unittest.TestCase):
@@ -76,13 +80,24 @@ class DiagnosticBundleTest(unittest.TestCase):
             "run_id": "r1",
             "dataset_sha256": "dataset-hash",
             "store_name": "store_index",
-            "store_fingerprint": "store-hash",
+            "store_fingerprint": None,
             "config": {"max_rounds": 50, "provider_timeout": "must not leak"},
             "providers": {"chat": "model", "endpoint": "must not leak"},
         }
         trajectory_path = root / "q1.trajectory.json"
         evaluation_path = root / "evaluation.json"
         manifest_path = root / "manifest.json"
+        store = root / "store"
+        store.mkdir()
+        (store / "report_corpus.json").write_text(json.dumps({
+            "nodes": [{
+                "id": "n1",
+                "title": "Revenue",
+                "paragraphs": ["Revenue was $12 million."],
+                "children": [],
+            }]
+        }))
+        manifest["store_fingerprint"] = store_fingerprint(store)
         trajectory_path.write_text(json.dumps(trajectory), encoding="utf-8")
         evaluation_path.write_text(json.dumps(evaluation), encoding="utf-8")
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -91,6 +106,7 @@ class DiagnosticBundleTest(unittest.TestCase):
             trajectory_path=trajectory_path,
             evaluation_path=evaluation_path,
             run_manifest_path=manifest_path,
+            store_path=store,
             source_root=self.source_root,
             output_path=output,
         )
@@ -109,6 +125,8 @@ class DiagnosticBundleTest(unittest.TestCase):
         self.assertNotIn("must not leak", json.dumps(bundle))
         self.assertEqual(bundle["evaluation"]["gold_evidence"], ["Revenue was $12 million."])
         self.assertNotIn("evidence", bundle["evaluation"])
+        self.assertEqual(bundle["evidence_coverage"]["layers"]["corpus"]["recall"], 1.0)
+        self.assertEqual(bundle["evidence_coverage"]["primary_signal"], "candidate")
         self.assertTrue(source_paths)
         self.assertFalse(any("telemetry" in path or "providers" in path for path in source_paths))
         self.assertNotIn("systems/deepread/runtime.py", source_paths)

@@ -15,6 +15,7 @@ def main() -> int:
     parser.add_argument("--trajectory", type=Path, required=True)
     parser.add_argument("--evaluation", type=Path, required=True)
     parser.add_argument("--run-manifest", type=Path, required=True)
+    parser.add_argument("--store", type=Path, required=True)
     parser.add_argument("--source-root", type=Path, default=Path.cwd())
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -22,6 +23,7 @@ def main() -> int:
         trajectory_path=args.trajectory,
         evaluation_path=args.evaluation,
         run_manifest_path=args.run_manifest,
+        store_path=args.store,
         source_root=args.source_root,
         output_path=args.output,
     )

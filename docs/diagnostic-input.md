@@ -13,6 +13,7 @@ HarnessFix 的 GAIA failure analysis 同时提供 sanitized/raw trace 和 agent 
 - `task`：task ID、sample ID、question；
 - `run_context`：DeepRead 行为配置、模型名称、dataset/store fingerprint，不含 endpoint、API key 或 provider 实现；
 - `evaluation`：`gold_answers`、`gold_evidence`、generated answer、终止信息、证据匹配、确定性指标和 judge 结论；
+- `evidence_coverage`：gold evidence 在 corpus、检索候选、实际 read 和最终答案四层的确定性覆盖、最早缺失层及可追溯引用；
 - `trajectory`：紧凑的模型决策和工具交互；
 - `access`：源码/payload manifest、允许工具和明确排除层。
 
@@ -61,8 +62,9 @@ python runner/build_diagnostic_bundle.py \
   --trajectory <task.trajectory.json> \
   --evaluation <evaluation.json> \
   --run-manifest <manifest.json> \
+  --store <store-index-directory> \
   --source-root <repository-root> \
   --output <empty-output-directory>
 ```
 
-builder 校验 task/question/run 对齐、trajectory schema、source hash 和外置 payload hash，并将引用 payload 复制到 bundle，使诊断输入不依赖原 trajectory 目录。
+builder 校验 task/question/run 对齐、trajectory schema、store fingerprint、source hash 和外置 payload hash，并将引用 payload 复制到 bundle，使诊断输入不依赖原 trajectory 目录。四层覆盖在局部证据窗口内使用可处理 HTML 表格边界的 canonical token 集合启发式：corpus 仅合并同一节点的相邻段，candidate 仅合并同一次 hit 与 neighbors，read 仅合并同一次读取结果，不跨无关 passage 拼接 token。它给出可复现的失败信号，但不等同于语义蕴含判断，且 gold evidence 可能不是唯一有效证据。

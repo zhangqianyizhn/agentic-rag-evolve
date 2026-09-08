@@ -10,7 +10,7 @@ class FakeJudge:
         self.content = content
         self.error = error
 
-    def complete(self, payload, *, logger=None, query_id=""):
+    def complete(self, payload):
         if self.error:
             raise self.error
         return {

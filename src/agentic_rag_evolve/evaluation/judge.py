@@ -14,9 +14,6 @@ class JudgeModel(Protocol):
     def complete(
         self,
         payload: Mapping[str, Any],
-        *,
-        logger: Any | None = None,
-        query_id: str = "",
     ) -> Mapping[str, Any]: ...
 
 
@@ -92,7 +89,7 @@ Respond ONLY with a JSON object: {{"score": 0 to 4, "reasoning": "string"}}"""
         "stream": False,
     }
     try:
-        response = model.complete(payload, query_id=f"judge:{task_id}")
+        response = model.complete(payload)
         message = (response.get("choices") or [{}])[0].get("message") or {}
         content = str(message.get("content") or "")
         parsed = _parse_json_object(content)

@@ -9,6 +9,8 @@ from typing import Any, Mapping, Sequence
 import requests
 import tiktoken
 
+from agentic_rag_evolve.telemetry.context import emit_trace
+
 
 def _count_tokens(value: Any) -> int:
     encoding = tiktoken.get_encoding("cl100k_base")
@@ -34,9 +36,6 @@ class OpenAICompatibleChatModel:
     def complete(
         self,
         payload: Mapping[str, Any],
-        *,
-        logger: Any | None = None,
-        query_id: str = "",
     ) -> Mapping[str, Any]:
         url = f"{self.base_url}/chat/completions"
         request_payload = dict(payload)
@@ -51,14 +50,11 @@ class OpenAICompatibleChatModel:
         for attempt in range(1, self.max_retries + 1):
             if attempt > 1:
                 time.sleep(min(90, 1.5 * (2 ** (attempt - 2))))
-            if logger:
-                logger.log(
-                    "llm_http_attempt",
-                    query_id=query_id,
-                    attempt=attempt,
-                    url=url,
-                    model=self.model_name,
-                )
+            emit_trace(
+                "llm_http_attempt",
+                attempt=attempt,
+                model=self.model_name,
+            )
             try:
                 response = requests.post(
                     url,
@@ -69,42 +65,35 @@ class OpenAICompatibleChatModel:
                 status = response.status_code
                 retryable = status in {429, 500, 502, 503, 504}
                 if retryable and attempt < self.max_retries:
-                    if logger:
-                        logger.log(
-                            "llm_http_error",
-                            query_id=query_id,
-                            status_code=status,
-                            error=f"HTTP {status}",
-                            attempt=attempt,
-                            will_retry=True,
-                        )
+                    emit_trace(
+                        "llm_http_error",
+                        status_code=status,
+                        error=f"HTTP {status}",
+                        attempt=attempt,
+                        will_retry=True,
+                    )
                     continue
                 response.raise_for_status()
                 result = response.json()
-                if logger:
-                    logger.log(
-                        "llm_http_success",
-                        query_id=query_id,
-                        attempt=attempt,
-                        status_code=status,
-                    )
-                    logger.log(
-                        "llm_token_debug",
-                        query_id=query_id,
-                        input_tokens=_count_tokens(request_payload.get("messages", [])),
-                        output_tokens=_count_tokens(result.get("choices", [])),
-                    )
+                emit_trace(
+                    "llm_http_success",
+                    attempt=attempt,
+                    status_code=status,
+                )
+                emit_trace(
+                    "llm_token_debug",
+                    input_tokens=_count_tokens(request_payload.get("messages", [])),
+                    output_tokens=_count_tokens(result.get("choices", [])),
+                )
                 return result
             except requests.RequestException as exc:
                 will_retry = attempt < self.max_retries
-                if logger:
-                    logger.log(
-                        "llm_http_error",
-                        query_id=query_id,
-                        error=str(exc),
-                        attempt=attempt,
-                        will_retry=will_retry,
-                    )
+                emit_trace(
+                    "llm_http_error",
+                    error=str(exc),
+                    attempt=attempt,
+                    will_retry=will_retry,
+                )
                 if not will_retry:
                     raise
 

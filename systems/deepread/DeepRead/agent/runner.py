@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from .llm import (
-    _preview_messages,
     _preview_tool_calls,
     sanitize_for_vllm,
     should_sanitize_for_vllm,
@@ -52,7 +50,6 @@ def run_agent(
     collected_texts: Optional[List[str]] = None,
 ) -> str:
     tools = make_tools_schema(doc_index, enable_semantic=enable_semantic)
-    query_id = hashlib.sha1(user_question.encode('utf-8')).hexdigest()[:16]
 
     if disable_bm25:
         tools = [t for t in tools if (t.get("function") or {}).get("name") != "bm25_search"]
@@ -71,8 +68,6 @@ def run_agent(
     system_prompt = build_system_prompt(doc_index, tool_names, enable_reasoning=enable_reasoning)
 
     messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_question}]
-    prev_msg_count = 1
-
     do_sanitize = should_sanitize_for_vllm(chat_model.base_url)
 
     effective_neighbor_window: Optional[Tuple[int, int]] = neighbor_window if neighbor_window is not None else doc_index.neighbor_window
@@ -88,24 +83,16 @@ def run_agent(
             "include_reasoning": bool(enable_reasoning),
         }
 
-        logger.log("llm_request", query_id=query_id, round=round_id, base_url=chat_model.base_url, context_delta_preview=_preview_messages(messages[prev_msg_count:]))
-        prev_msg_count = len(messages)
-
         payload_to_send = sanitize_for_vllm(req_payload, allow_tools=True) if do_sanitize else req_payload
 
         try:
-            resp = dict(chat_model.complete(
-                payload_to_send,
-                query_id=query_id,
-                logger=logger,
-            ))
+            resp = dict(chat_model.complete(payload_to_send))
             usage = resp.get("usage") or {}
             token_tracker.add(
                 int(usage.get("prompt_tokens") or 0),
                 int(usage.get("completion_tokens") or 0),
             )
-        except Exception as exc:
-            logger.log("llm_http_error", query_id=query_id, error=str(exc), round=round_id)
+        except Exception:
             resp = {}
 
         msg = (resp.get("choices") or [{}])[0].get("message", {})  # type: ignore
@@ -131,7 +118,6 @@ def run_agent(
                 recovered_from_text = True
                 logger.log(
                     "tool_calls_recovered_from_text",
-                    query_id=query_id,
                     round=round_id,
                     recovered=_preview_tool_calls(tool_calls),
                     recovered_kind=recovered_meta.get("kind"),
@@ -157,29 +143,16 @@ def run_agent(
 
         messages.append(assistant_entry)
 
-        logger.log(
-            "llm_response",
-            query_id=query_id,
-            round=round_id,
-            content=msg.get("content"),
-            reasoning_content=reasoning_content if enable_reasoning else None,
-            tool_calls=_preview_tool_calls(tool_calls),
-            context_delta_preview=_preview_messages(messages[prev_msg_count:]) if tool_calls else None,
-        )
-
-        if tool_calls:
-            prev_msg_count = len(messages)
-
         if not tool_calls:
             final_answer = (msg.get("content") or "").strip()
             if final_answer:
-                logger.log("final_answer", query_id=query_id, answer=final_answer, context_delta_preview=_preview_messages(messages[prev_msg_count:]))
+                logger.log("final_answer", answer=final_answer)
                 return final_answer
 
             if enable_reasoning and (reasoning_content is not None) and str(reasoning_content).strip():
-                logger.log("llm_thinking_only", query_id=query_id, round=round_id, reasoning_preview=str(reasoning_content)[:2000])
+                logger.log("llm_thinking_only", round=round_id, reasoning_preview=str(reasoning_content)[:2000])
             else:
-                logger.log("llm_empty_message", query_id=query_id, round=round_id)
+                logger.log("llm_empty_message", round=round_id)
             continue
 
         for tc in tool_calls or []:
@@ -188,10 +161,10 @@ def run_agent(
                 args_raw = (tc.get("function") or {}).get("arguments")
                 args = args_raw if isinstance(args_raw, dict) else json.loads(args_raw or "{}")
             except Exception as exc:
-                logger.log("tool_args_parse_error", query_id=query_id, tool=tool_name, raw=str(args_raw), error=str(exc))
+                logger.log("tool_args_parse_error", tool=tool_name, raw=str(args_raw), error=str(exc))
                 args = {}
 
-            logger.log("tool_call", query_id=query_id, tool=tool_name, args=args, tool_call_id=tc.get("id"))
+            logger.log("tool_call", tool=tool_name, args=args, tool_call_id=tc.get("id"))
 
             try:
                 if tool_name == "get_doc_structure":
@@ -311,29 +284,23 @@ def run_agent(
 
                 logger.log(
                     "tool_result",
-                    query_id=query_id,
                     tool=tool_name,
                     tool_call_id=tc.get("id"),
                     ok=bool(out.get("ok", True)) if isinstance(out, dict) else True,
                     result=out,
-                    context_delta_preview=_preview_messages(messages[prev_msg_count:]),
                 )
-                prev_msg_count = len(messages)
 
             except Exception as exc:
                 err = {"ok": False, "error": str(exc)}
                 messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": json.dumps(err, ensure_ascii=False)})
                 logger.log(
                     "tool_result",
-                    query_id=query_id,
                     tool=tool_name,
                     tool_call_id=tc.get("id"),
                     ok=False,
                     error=str(exc),
                     result=err,
-                    context_delta_preview=_preview_messages(messages[prev_msg_count:]),
                 )
-                prev_msg_count = len(messages)
 
-    logger.log("max_rounds_reached", query_id=query_id, max_rounds=max_rounds)
+    logger.log("max_rounds_reached", max_rounds=max_rounds)
     return "(Reached maximum rounds, no final answer generated)"

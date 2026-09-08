@@ -18,9 +18,6 @@ class ChatModel(Protocol):
     def complete(
         self,
         payload: Mapping[str, Any],
-        *,
-        logger: EventLogger | None = None,
-        query_id: str = "",
     ) -> Mapping[str, Any]: ...
 
 

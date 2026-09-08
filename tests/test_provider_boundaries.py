@@ -18,7 +18,7 @@ class FakeChatModel:
     def __init__(self) -> None:
         self.payloads: list[Mapping[str, Any]] = []
 
-    def complete(self, payload, *, logger=None, query_id=""):
+    def complete(self, payload):
         self.payloads.append(payload)
         return {
             "choices": [{"message": {"content": "answer", "tool_calls": None}}],
@@ -42,7 +42,7 @@ class ToolCallingChatModel:
     def __init__(self) -> None:
         self.call_count = 0
 
-    def complete(self, payload, *, logger=None, query_id=""):
+    def complete(self, payload):
         self.call_count += 1
         if self.call_count == 1:
             message = {

@@ -18,6 +18,7 @@ EVENT_KINDS = {
     "llm_http_attempt": "provider.attempt",
     "llm_http_success": "provider.success",
     "llm_http_error": "provider.error",
+    "llm_call_error": "model.error",
     "llm_token_debug": "provider.token_estimate",
     "tool_call": "tool.call",
     "tool_result": "tool.result",
@@ -184,7 +185,7 @@ def _compile_task(prediction: Mapping[str, Any], raw_events: Sequence[Mapping[st
             }
             pending_tools = {}
             latest_tool = None
-        elif raw_name in {"llm_http_attempt", "llm_http_success", "llm_http_error", "llm_token_debug", "llm_response"}:
+        elif raw_name in {"llm_http_attempt", "llm_http_success", "llm_http_error", "llm_call_error", "llm_token_debug", "llm_response"}:
             if current_turn is None:
                 warnings.append(f"orphan_event:{raw_event_id}")
                 continue
@@ -194,7 +195,7 @@ def _compile_task(prediction: Mapping[str, Any], raw_events: Sequence[Mapping[st
                 model["provider_attempts"] = int(model.get("provider_attempts", 0)) + 1
                 if raw.get("model"):
                     model["name"] = raw["model"]
-            elif raw_name == "llm_http_error":
+            elif raw_name in {"llm_http_error", "llm_call_error"}:
                 model.setdefault("provider_errors", []).append(str(raw.get("error") or "unknown error"))
             elif raw_name == "llm_token_debug":
                 model["token_estimate"] = {

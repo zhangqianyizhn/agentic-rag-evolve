@@ -12,7 +12,7 @@ class FakeChat:
     model_name = "fake-chat"
     base_url = "local://fake"
 
-    def complete(self, payload, *, logger=None, query_id=""):
+    def complete(self, payload):
         return {
             "choices": [{"message": {"content": "final", "tool_calls": None}}],
             "usage": {"prompt_tokens": 2, "completion_tokens": 1},
@@ -77,13 +77,20 @@ class DeepReadRunnerTest(unittest.TestCase):
             self.assertNotIn(str(root), manifest_text)
             self.assertIn("dataset_sha256", manifest_text)
             self.assertTrue((output / "deepread_trace.jsonl").is_file())
-            trace_event = json.loads(
-                (output / "deepread_trace.jsonl").read_text(encoding="utf-8").splitlines()[0]
-            )
+            trace_events = [
+                json.loads(line)
+                for line in (output / "deepread_trace.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            trace_event = trace_events[0]
             manifest = json.loads(manifest_text)
             self.assertEqual(trace_event["task_id"], "q1")
             self.assertEqual(trace_event["run_id"], manifest["run_id"])
             self.assertEqual(trace_event["event_id"], "event_000001")
+            self.assertEqual(
+                [event["event"] for event in trace_events],
+                ["llm_request", "llm_response", "final_answer"],
+            )
+            self.assertTrue(all("query_id" not in event for event in trace_events))
 
 
 if __name__ == "__main__":

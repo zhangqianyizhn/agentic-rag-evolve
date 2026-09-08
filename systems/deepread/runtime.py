@@ -8,7 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agentic_rag_evolve.telemetry import JsonlTraceWriter, ScopedTraceWriter
+from agentic_rag_evolve.telemetry import (
+    JsonlTraceWriter,
+    ScopedTraceWriter,
+    TracingChatModel,
+    trace_context,
+)
 
 from .DeepRead.agent import run_agent
 from .DeepRead.ports import ChatModel, EmbeddingModel, Reranker
@@ -142,30 +147,31 @@ class GlobalDeepReadRuntime:
             {"run_id": self.run_id, "task_id": task_id},
         )
 
-        answer = run_agent(
-            chat_model=self.chat_model,
-            doc_index=self.load_index(),
-            user_question=question,
-            logger=logger,
-            max_rounds=self.config.max_rounds,
-            temperature=self.config.temperature,
-            enable_vector=self.config.enable_vector,
-            enable_hybrid=self.config.enable_hybrid,
-            enable_semantic=self.config.enable_semantic,
-            disable_bm25=False,
-            disable_regex=False,
-            disable_read=False,
-            embedding_model=self.embedding_model,
-            reranker=self.reranker,
-            neighbor_window=self.config.neighbor_window,
-            bm25_topk=self.config.retrieval_topk,
-            regex_topk=self.config.retrieval_topk,
-            vector_topk=self.config.retrieval_topk,
-            hybrid_topk=self.config.retrieval_topk,
-            semantic_topk1=30,
-            semantic_topk2=1,
-            collected_texts=retrieved_texts,
-        )
+        with trace_context(logger):
+            answer = run_agent(
+                chat_model=TracingChatModel(self.chat_model),
+                doc_index=self.load_index(),
+                user_question=question,
+                logger=logger,
+                max_rounds=self.config.max_rounds,
+                temperature=self.config.temperature,
+                enable_vector=self.config.enable_vector,
+                enable_hybrid=self.config.enable_hybrid,
+                enable_semantic=self.config.enable_semantic,
+                disable_bm25=False,
+                disable_regex=False,
+                disable_read=False,
+                embedding_model=self.embedding_model,
+                reranker=self.reranker,
+                neighbor_window=self.config.neighbor_window,
+                bm25_topk=self.config.retrieval_topk,
+                regex_topk=self.config.retrieval_topk,
+                vector_topk=self.config.retrieval_topk,
+                hybrid_topk=self.config.retrieval_topk,
+                semantic_topk1=30,
+                semantic_topk2=1,
+                collected_texts=retrieved_texts,
+            )
         usage = token_tracker.get()
         return DeepReadQueryResult(
             answer=answer,

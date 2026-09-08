@@ -11,8 +11,10 @@ from typing import Any
 from agentic_rag_evolve.telemetry import (
     JsonlTraceWriter,
     ScopedTraceWriter,
+    TraceAgentObserver,
     TracingChatModel,
     TracingToolExecutor,
+    emit_trace,
     trace_context,
 )
 
@@ -44,6 +46,8 @@ class DeepReadConfig:
 @dataclass(frozen=True, slots=True)
 class DeepReadQueryResult:
     answer: str
+    termination_reason: str
+    rounds_completed: int
     retrieved_texts: tuple[str, ...]
     input_tokens: int
     output_tokens: int
@@ -52,6 +56,8 @@ class DeepReadQueryResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "answer": self.answer,
+            "termination_reason": self.termination_reason,
+            "rounds_completed": self.rounds_completed,
             "retrieved_texts": list(self.retrieved_texts),
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
@@ -163,12 +169,12 @@ class GlobalDeepReadRuntime:
                     semantic_topk2=1,
                 )
             )
-            answer = run_agent(
+            outcome = run_agent(
                 chat_model=TracingChatModel(self.chat_model),
                 doc_index=self.load_index(),
                 tool_executor=tool_executor,
                 user_question=question,
-                logger=logger,
+                observer=TraceAgentObserver(),
                 max_rounds=self.config.max_rounds,
                 temperature=self.config.temperature,
                 enable_vector=self.config.enable_vector,
@@ -179,9 +185,19 @@ class GlobalDeepReadRuntime:
                 disable_read=False,
                 collected_texts=retrieved_texts,
             )
+            if outcome.termination_reason == "final_answer":
+                emit_trace("final_answer", answer=outcome.answer)
+            else:
+                emit_trace(
+                    "max_rounds_reached",
+                    max_rounds=self.config.max_rounds,
+                    rounds_completed=outcome.rounds_completed,
+                )
         usage = token_tracker.get()
         return DeepReadQueryResult(
-            answer=answer,
+            answer=outcome.answer,
+            termination_reason=outcome.termination_reason,
+            rounds_completed=outcome.rounds_completed,
             retrieved_texts=tuple(retrieved_texts),
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],

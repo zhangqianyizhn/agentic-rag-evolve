@@ -5,10 +5,6 @@ from __future__ import annotations
 from typing import Any, Mapping, Protocol, Sequence
 
 
-class EventLogger(Protocol):
-    def log(self, event: str, **fields: Any) -> None: ...
-
-
 class ChatModel(Protocol):
     """A chat-completion capability injected by the stable runner."""
 

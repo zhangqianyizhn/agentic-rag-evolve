@@ -125,6 +125,8 @@ def run_financebench(
                     "run_id": run_id,
                     "status": "ok",
                     "answer": result.answer,
+                    "termination_reason": result.termination_reason,
+                    "rounds_completed": result.rounds_completed,
                     "retrieved_texts": list(result.retrieved_texts),
                     "token_usage": {
                         "input_tokens": result.input_tokens,

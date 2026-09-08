@@ -4,11 +4,11 @@ import json
 from typing import Any, Dict, List, Optional
 
 from .llm import (
-    _preview_tool_calls,
     sanitize_for_vllm,
     should_sanitize_for_vllm,
 )
-from ..ports import ChatModel, EventLogger, ToolExecutor
+from .contracts import AgentObserver, AgentOutcome
+from ..ports import ChatModel, ToolExecutor
 from ..prompt.system import build_system_prompt
 from ..runtime_state import token_tracker
 from ..tool.fallback import fallback_tool_calls_from_text, strip_function_calls_block_any, strip_inline_tool_calls
@@ -20,7 +20,7 @@ def run_agent(
     doc_index: DocIndex,
     tool_executor: ToolExecutor,
     user_question: str,
-    logger: EventLogger,
+    observer: AgentObserver,
     max_rounds: int = 50,
     temperature: float = 0.0,
     enable_multimodal: bool = False,
@@ -33,7 +33,7 @@ def run_agent(
     tool_fallback: bool = True,
     enable_reasoning: bool = True,
     collected_texts: Optional[List[str]] = None,
-) -> str:
+) -> AgentOutcome:
     tools = make_tools_schema(doc_index, enable_semantic=enable_semantic)
 
     if disable_bm25:
@@ -99,11 +99,10 @@ def run_agent(
             if rec:
                 tool_calls, recovered_meta = rec
                 recovered_from_text = True
-                logger.log(
-                    "tool_calls_recovered_from_text",
-                    round=round_id,
-                    recovered=_preview_tool_calls(tool_calls),
-                    recovered_kind=recovered_meta.get("kind"),
+                observer.tool_calls_recovered(
+                    round_number=round_id,
+                    tool_calls=tool_calls,
+                    recovery_kind=recovered_meta.get("kind"),
                 )
 
         assistant_entry: Dict[str, Any] = {"role": "assistant"}
@@ -129,13 +128,19 @@ def run_agent(
         if not tool_calls:
             final_answer = (msg.get("content") or "").strip()
             if final_answer:
-                logger.log("final_answer", answer=final_answer)
-                return final_answer
+                return AgentOutcome(
+                    answer=final_answer,
+                    termination_reason="final_answer",
+                    rounds_completed=round_id,
+                )
 
-            if enable_reasoning and (reasoning_content is not None) and str(reasoning_content).strip():
-                logger.log("llm_thinking_only", round=round_id, reasoning_preview=str(reasoning_content)[:2000])
-            else:
-                logger.log("llm_empty_message", round=round_id)
+            reasoning_preview = None
+            if enable_reasoning and reasoning_content is not None:
+                reasoning_preview = str(reasoning_content).strip()[:2000] or None
+            observer.model_response_empty(
+                round_number=round_id,
+                reasoning_preview=reasoning_preview,
+            )
             continue
 
         for tc in tool_calls or []:
@@ -144,7 +149,13 @@ def run_agent(
                 args_raw = (tc.get("function") or {}).get("arguments")
                 args = args_raw if isinstance(args_raw, dict) else json.loads(args_raw or "{}")
             except Exception as exc:
-                logger.log("tool_args_parse_error", tool=tool_name, raw=str(args_raw), error=str(exc))
+                observer.tool_arguments_invalid(
+                    round_number=round_id,
+                    tool_name=tool_name,
+                    call_id=tc.get("id"),
+                    raw_arguments=str(args_raw),
+                    error=str(exc),
+                )
                 args = {}
 
             try:
@@ -195,5 +206,8 @@ def run_agent(
                 err = {"ok": False, "error": str(exc)}
                 messages.append({"role": "tool", "tool_call_id": tc.get("id"), "content": json.dumps(err, ensure_ascii=False)})
 
-    logger.log("max_rounds_reached", max_rounds=max_rounds)
-    return "(Reached maximum rounds, no final answer generated)"
+    return AgentOutcome(
+        answer="(Reached maximum rounds, no final answer generated)",
+        termination_reason="max_rounds",
+        rounds_completed=max_rounds,
+    )

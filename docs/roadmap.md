@@ -52,10 +52,10 @@
 
 ## M3：评测结果和确定性失败信号
 
-- 对齐 generated answer、gold answer、gold evidence 与 trajectory；
+- [x] 对齐 generated answer、gold answer、gold evidence 与 trajectory；
 - [x] 计算 evidence-to-corpus、candidate、read、answer 四级覆盖；
-- 区分执行异常、无答案、错误答案和评测可疑样本；
-- 生成可人工审阅的 bad-case 报告。
+- [x] 区分执行异常、无答案、错误答案和评测可疑样本；
+- [x] 生成可人工审阅的 bad-case 报告。
 
 完成条件：在冻结样本上完成人工核查，并报告启发式信号的不确定性。
 

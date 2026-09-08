@@ -25,6 +25,7 @@ systems/deepread/
 src/agentic_rag_evolve/
   providers/                # target 不可见的模型配置、鉴权与传输实现
   evaluation/               # F1、证据召回、LLM judge 与历史结果对比
+  diagnostics/              # evidence ladder、失败信号、受限输入包与报告
   deepread_runner.py        # 稳定单数据集执行协议
   reference_validation.py  # golden store/run 只读校验
 runner/                     # 框架 CLI；不属于被进化的 DeepRead
@@ -58,6 +59,8 @@ uv run python runner/validate_reference.py --store <store_index> --run <historic
 uv run python runner/run_deepread.py --dataset <dataset.jsonl> --store <store_index> --output <empty_run_dir>
 uv run python runner/evaluate_deepread.py --dataset <dataset.jsonl> --predictions <predictions.jsonl> --output <empty_eval_dir> --judge
 uv run python runner/compile_trajectory.py --trace <deepread_trace.jsonl> --predictions <predictions.jsonl> --output <empty_trajectory_dir>
+uv run python runner/build_diagnostic_bundle.py --trajectory <trajectory.json> --evaluation <evaluation.json> --run-manifest <manifest.json> --store <store_index> --output <empty_bundle_dir>
+uv run python runner/build_bad_case_report.py --bundle <bundle_dir> --output <empty_report_dir>
 ```
 
-模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)，事件与轨迹协议见 [DeepRead trajectory](docs/trajectory.md)。
+模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)，事件与轨迹协议见 [DeepRead trajectory](docs/trajectory.md)，诊断 triage 见 [确定性失败信号](docs/failure-signals.md)。

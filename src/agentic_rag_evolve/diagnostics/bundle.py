@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from .evidence import analyze_evidence_ladder
 from .policy import DIAGNOSTIC_SOURCE_POLICY, DIAGNOSTIC_TOOL_CONTRACTS
+from .signals import analyze_failure_signals
 
 
 TRAJECTORY_TOP_FIELDS = (
@@ -223,6 +224,11 @@ def build_diagnostic_bundle(
     evaluation = _project_evaluation(_select_evaluation(_load_json(evaluation_path), task_id))
     if trajectory.get("question") != evaluation.get("question"):
         raise ValueError(f"trajectory/evaluation question mismatch for task_id {task_id}")
+    prediction = evaluation.get("prediction") or {}
+    if trajectory.get("answer") != prediction.get("answer"):
+        raise ValueError(f"trajectory/evaluation answer mismatch for task_id {task_id}")
+    if trajectory.get("status") != prediction.get("status"):
+        raise ValueError(f"trajectory/evaluation status mismatch for task_id {task_id}")
     run_manifest = _load_json(run_manifest_path)
     if raw_trajectory.get("run_id") and run_manifest.get("run_id") != raw_trajectory.get("run_id"):
         raise ValueError("trajectory/run manifest run_id mismatch")
@@ -238,6 +244,11 @@ def build_diagnostic_bundle(
         store_path=Path(store_path),
         payload_root=output_path,
         expected_store_fingerprint=run_manifest.get("store_fingerprint"),
+    )
+    failure_signals = analyze_failure_signals(
+        evaluation=evaluation,
+        trajectory=trajectory,
+        evidence_coverage=evidence_coverage,
     )
     sources = _source_manifest(Path(source_root))
     bundle = {
@@ -266,6 +277,7 @@ def build_diagnostic_bundle(
         },
         "evaluation": evaluation,
         "evidence_coverage": evidence_coverage,
+        "failure_signals": failure_signals,
         "trajectory": trajectory,
         "access": {
             "sources": sources,

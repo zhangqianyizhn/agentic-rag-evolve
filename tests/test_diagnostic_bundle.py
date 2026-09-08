@@ -127,6 +127,11 @@ class DiagnosticBundleTest(unittest.TestCase):
         self.assertNotIn("evidence", bundle["evaluation"])
         self.assertEqual(bundle["evidence_coverage"]["layers"]["corpus"]["recall"], 1.0)
         self.assertEqual(bundle["evidence_coverage"]["primary_signal"], "candidate")
+        self.assertEqual(bundle["failure_signals"]["triage"], "pass")
+        self.assertEqual(
+            bundle["failure_signals"]["signals"][0]["code"],
+            "retrieval_candidate_miss",
+        )
         self.assertTrue(source_paths)
         self.assertFalse(any("telemetry" in path or "providers" in path for path in source_paths))
         self.assertNotIn("systems/deepread/runtime.py", source_paths)
@@ -173,6 +178,25 @@ class DiagnosticBundleTest(unittest.TestCase):
             (output / payload_relative).write_text("tampered", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "payload byte count mismatch"):
                 reader.read_payload(payload_relative.as_posix())
+
+    def test_builder_rejects_prediction_answer_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._build(root)
+            evaluation_path = root / "evaluation.json"
+            evaluation = json.loads(evaluation_path.read_text())
+            evaluation[0]["prediction"]["answer"] = "different answer"
+            evaluation_path.write_text(json.dumps(evaluation), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "answer mismatch"):
+                build_diagnostic_bundle(
+                    trajectory_path=root / "q1.trajectory.json",
+                    evaluation_path=evaluation_path,
+                    run_manifest_path=root / "manifest.json",
+                    store_path=root / "store",
+                    source_root=self.source_root,
+                    output_path=root / "mismatch",
+                )
 
 
 if __name__ == "__main__":

@@ -29,18 +29,7 @@ EVENT_KINDS = {
     "llm_thinking_only": "model.thinking_only",
 }
 
-_METADATA_FIELDS = {
-    "schema_version",
-    "event_id",
-    "ts",
-    "event",
-    "run_id",
-    "task_id",
-    "query_id",
-    "round",
-}
-_OMITTED_FIELDS = {"context_delta_preview", "base_url", "url"}
-
+DEFAULT_INLINE_RESULT_BYTES = 16_000
 
 @dataclass(frozen=True, slots=True)
 class CompilationReport:
@@ -81,27 +70,78 @@ def _safe_name(task_id: str) -> str:
     return safe or hashlib.sha1(task_id.encode("utf-8")).hexdigest()[:16]
 
 
-def _compact_payload(raw: Mapping[str, Any]) -> dict[str, Any]:
-    payload = {
-        key: value
-        for key, value in raw.items()
-        if key not in _METADATA_FIELDS and key not in _OMITTED_FIELDS
+def _result_summary(result: Any) -> dict[str, Any]:
+    summary: dict[str, Any] = {"type": type(result).__name__}
+    if isinstance(result, dict):
+        summary["keys"] = sorted(str(key) for key in result)
+        for key in ("results", "nodes", "sections"):
+            value = result.get(key)
+            if isinstance(value, list):
+                summary[f"{key}_count"] = len(value)
+    elif isinstance(result, list):
+        summary["item_count"] = len(result)
+    elif isinstance(result, str):
+        summary["character_count"] = len(result)
+    return summary
+
+
+def _externalize_large_results(
+    trajectory: dict[str, Any],
+    *,
+    output_path: Path,
+    inline_result_bytes: int,
+) -> None:
+    task_name = _safe_name(str(trajectory["task_id"]))
+    for turn_index, turn in enumerate(trajectory["turns"], start=1):
+        for tool_index, tool in enumerate(turn.get("tools", ()), start=1):
+            result = tool.get("result")
+            if result is None:
+                continue
+            encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            if len(encoded) <= inline_result_bytes:
+                continue
+            digest = hashlib.sha256(encoded).hexdigest()
+            relative_path = Path("payloads") / task_name / (
+                f"turn_{turn_index:03d}_tool_{tool_index:03d}_{digest[:12]}.json"
+            )
+            payload_path = output_path / relative_path
+            payload_path.parent.mkdir(parents=True, exist_ok=True)
+            payload_path.write_bytes(encoded)
+            tool["result_summary"] = _result_summary(result)
+            tool["result_ref"] = {
+                "path": relative_path.as_posix(),
+                "sha256": digest,
+                "bytes": len(encoded),
+            }
+            del tool["result"]
+
+
+def _finish_turn(turn: dict[str, Any]) -> dict[str, Any]:
+    raw_ids = turn.pop("raw_event_ids")
+    turn["raw_event_range"] = {
+        "first": raw_ids[0],
+        "last": raw_ids[-1],
+        "count": len(raw_ids),
     }
-    omitted = sorted(key for key in _OMITTED_FIELDS if key in raw)
-    if omitted:
-        payload["omitted_fields"] = omitted
-    return payload
+    model = turn["model"]
+    if model.get("provider_attempts", 0) <= 1:
+        model.pop("provider_attempts", None)
+    requested = model.get("requested_tools")
+    actual = [tool["name"] for tool in turn["tools"]]
+    if requested == actual:
+        model.pop("requested_tools", None)
+    if not turn["tools"]:
+        turn.pop("tools")
+    return turn
 
 
 def _compile_task(prediction: Mapping[str, Any], raw_events: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     task_id = str(prediction["task_id"])
     warnings: list[str] = []
-    events: list[dict[str, Any]] = []
-    request_by_round: dict[int, str] = {}
-    tool_calls: dict[str, str] = {}
-    latest_request: str | None = None
-    latest_response: str | None = None
-    latest_tool_call: str | None = None
+    turns: list[dict[str, Any]] = []
+    current_turn: dict[str, Any] | None = None
+    pending_tools: dict[str, dict[str, Any]] = {}
+    latest_tool: dict[str, Any] | None = None
     tool_counts: Counter[str] = Counter()
     retrieved_doc_ids: set[str] = set()
     read_doc_ids: set[str] = set()
@@ -109,17 +149,16 @@ def _compile_task(prediction: Mapping[str, Any], raw_events: Sequence[Mapping[st
     rounds: set[int] = set()
     raw_event_ids: set[str] = set()
     last_timestamp: datetime | None = None
+    terminal: str | None = None
 
     for sequence, raw in enumerate(raw_events, start=1):
         raw_name = str(raw.get("event") or "unknown")
-        kind = EVENT_KINDS.get(raw_name, f"raw.{raw_name}")
         if raw_name not in EVENT_KINDS:
             warnings.append(f"unknown_event:{raw_name}")
         raw_event_id = str(raw.get("event_id") or f"legacy_{sequence:06d}")
         if raw_event_id in raw_event_ids:
             warnings.append(f"duplicate_raw_event_id:{raw_event_id}")
         raw_event_ids.add(raw_event_id)
-        step_id = f"step_{sequence:04d}"
         timestamp = raw.get("ts")
         if timestamp:
             try:
@@ -134,29 +173,81 @@ def _compile_task(prediction: Mapping[str, Any], raw_events: Sequence[Mapping[st
         if round_number is not None:
             rounds.add(round_number)
 
-        parent_id: str | None = None
         if raw_name == "llm_request":
-            latest_request = step_id
-            if round_number is not None:
-                request_by_round[round_number] = step_id
-        elif raw_name in {"llm_response", "llm_http_attempt", "llm_http_success", "llm_http_error", "llm_token_debug"}:
-            parent_id = request_by_round.get(round_number) if round_number is not None else latest_request
-            if raw_name == "llm_response":
-                latest_response = step_id
+            if current_turn is not None:
+                turns.append(_finish_turn(current_turn))
+            current_turn = {
+                "round": round_number,
+                "model": {},
+                "tools": [],
+                "raw_event_ids": [raw_event_id],
+            }
+            pending_tools = {}
+            latest_tool = None
+        elif raw_name in {"llm_http_attempt", "llm_http_success", "llm_http_error", "llm_token_debug", "llm_response"}:
+            if current_turn is None:
+                warnings.append(f"orphan_event:{raw_event_id}")
+                continue
+            current_turn["raw_event_ids"].append(raw_event_id)
+            model = current_turn["model"]
+            if raw_name == "llm_http_attempt":
+                model["provider_attempts"] = int(model.get("provider_attempts", 0)) + 1
+                if raw.get("model"):
+                    model["name"] = raw["model"]
+            elif raw_name == "llm_http_error":
+                model.setdefault("provider_errors", []).append(str(raw.get("error") or "unknown error"))
+            elif raw_name == "llm_token_debug":
+                model["token_estimate"] = {
+                    "input": raw.get("input_tokens"),
+                    "output": raw.get("output_tokens"),
+                }
+            elif raw_name == "llm_response":
+                if raw.get("reasoning_content"):
+                    model["reasoning"] = raw["reasoning_content"]
+                if raw.get("content"):
+                    model["content"] = raw["content"]
+                tool_calls_preview = raw.get("tool_calls") or []
+                if tool_calls_preview:
+                    model["requested_tools"] = [
+                        item.get("name") for item in tool_calls_preview if isinstance(item, dict)
+                    ]
         elif raw_name == "tool_call":
-            parent_id = latest_response
-            latest_tool_call = step_id
+            if current_turn is None:
+                warnings.append(f"orphan_event:{raw_event_id}")
+                continue
+            current_turn["raw_event_ids"].append(raw_event_id)
             call_id = str(raw.get("tool_call_id") or "")
+            tool_name = str(raw.get("tool") or "unknown")
+            interaction = {
+                "call_id": call_id or None,
+                "name": tool_name,
+                "arguments": raw.get("args") or {},
+                "ok": None,
+                "result": None,
+                "call_event_id": raw_event_id,
+            }
+            current_turn["tools"].append(interaction)
+            latest_tool = interaction
             if call_id:
-                tool_calls[call_id] = step_id
-            tool_counts[str(raw.get("tool") or "unknown")] += 1
+                pending_tools[call_id] = interaction
+            tool_counts[tool_name] += 1
             args = raw.get("args") or {}
             if raw.get("tool") == "read_section" and isinstance(args, dict) and args.get("doc_id") is not None:
                 read_doc_ids.add(str(args["doc_id"]))
         elif raw_name == "tool_result":
             explicit_call_id = str(raw.get("tool_call_id") or "")
-            parent_id = tool_calls.get(explicit_call_id) if explicit_call_id else latest_tool_call
-            if not explicit_call_id and parent_id is not None:
+            interaction = pending_tools.get(explicit_call_id) if explicit_call_id else latest_tool
+            if interaction is None:
+                warnings.append(f"orphan_event:{raw_event_id}")
+                continue
+            if current_turn is not None:
+                current_turn["raw_event_ids"].append(raw_event_id)
+            interaction["result_event_id"] = raw_event_id
+            interaction["ok"] = bool(raw.get("ok", True))
+            interaction["result"] = raw.get("result")
+            if raw.get("error"):
+                interaction["error"] = raw["error"]
+            if not explicit_call_id:
                 warnings.append(f"legacy_inferred_tool_parent:{raw_event_id}")
             result = raw.get("result") or {}
             if isinstance(result, dict):
@@ -168,26 +259,45 @@ def _compile_task(prediction: Mapping[str, Any], raw_events: Sequence[Mapping[st
                         if isinstance(ref, dict) and ref.get("doc_id") is not None:
                             retrieved_doc_ids.add(str(ref["doc_id"]))
         elif raw_name == "final_answer":
-            parent_id = latest_response
+            if current_turn is not None:
+                current_turn["raw_event_ids"].append(raw_event_id)
+                if current_turn["model"].get("content") == prediction.get("answer"):
+                    current_turn["model"].pop("content", None)
+                    current_turn["model"]["content_ref"] = "$.answer"
+            terminal = "answer.final"
+        elif raw_name == "max_rounds_reached":
+            if current_turn is not None:
+                current_turn["raw_event_ids"].append(raw_event_id)
+            terminal = "run.max_rounds"
+        elif raw_name in {"tool_args_parse_error", "tool_calls_recovered_from_text"}:
+            if current_turn is None:
+                warnings.append(f"orphan_event:{raw_event_id}")
+                continue
+            current_turn["raw_event_ids"].append(raw_event_id)
+            current_turn.setdefault("annotations", []).append({
+                "kind": EVENT_KINDS[raw_name],
+                "error": raw.get("error"),
+                "recovered_kind": raw.get("recovered_kind"),
+                "raw_event_id": raw_event_id,
+            })
+        elif raw_name in {"llm_empty_message", "llm_thinking_only"}:
+            if current_turn is None:
+                warnings.append(f"orphan_event:{raw_event_id}")
+                continue
+            current_turn["raw_event_ids"].append(raw_event_id)
+            current_turn.setdefault("annotations", []).append({
+                "kind": EVENT_KINDS[raw_name],
+                "raw_event_id": raw_event_id,
+            })
+        elif raw_name not in EVENT_KINDS:
+            if current_turn is not None:
+                current_turn.setdefault("other_events", []).append({
+                    "name": raw_name,
+                    "raw_event_id": raw_event_id,
+                })
 
-        if raw_name in {"llm_response", "tool_call", "tool_result", "final_answer"} and parent_id is None:
-            warnings.append(f"orphan_event:{raw_event_id}")
-
-        events.append({
-            "id": step_id,
-            "sequence": sequence,
-            "kind": kind,
-            "timestamp": timestamp,
-            "round": round_number,
-            "parent_id": parent_id,
-            "raw_event_id": raw_event_id,
-            "payload": _compact_payload(raw),
-        })
-
-    terminal = next(
-        (event["kind"] for event in reversed(events) if event["kind"] in {"answer.final", "run.max_rounds"}),
-        None,
-    )
+    if current_turn is not None:
+        turns.append(_finish_turn(current_turn))
     if terminal is None and prediction.get("status") == "ok":
         warnings.append("missing_terminal_event")
     run_ids = {str(event.get("run_id")) for event in raw_events if event.get("run_id")}
@@ -198,15 +308,14 @@ def _compile_task(prediction: Mapping[str, Any], raw_events: Sequence[Mapping[st
         warnings.append("multiple_run_ids")
 
     return {
-        "schema_version": "deepread-trajectory-v1",
+        "schema_version": "deepread-trajectory-v2",
         "run_id": next(iter(run_ids), None),
         "task_id": task_id,
-        "query_id": _question_query_id(str(prediction.get("question") or "")),
         "question": prediction.get("question"),
         "status": prediction.get("status"),
         "answer": prediction.get("answer"),
         "token_usage": prediction.get("token_usage") or {},
-        "events": events,
+        "turns": turns,
         "summary": {
             "round_count": len(rounds),
             "tool_call_count": sum(tool_counts.values()),
@@ -225,7 +334,10 @@ def compile_trajectories(
     trace_path: Path,
     prediction_path: Path,
     output_path: Path,
+    inline_result_bytes: int = DEFAULT_INLINE_RESULT_BYTES,
 ) -> CompilationReport:
+    if inline_result_bytes < 0:
+        raise ValueError("inline_result_bytes must not be negative")
     output_path = Path(output_path)
     if output_path.exists() and any(output_path.iterdir()):
         raise FileExistsError(f"trajectory output directory must be empty: {output_path}")
@@ -261,6 +373,11 @@ def compile_trajectories(
     for prediction in predictions:
         task_id = str(prediction["task_id"])
         trajectory = _compile_task(prediction, by_task.get(task_id, ()))
+        _externalize_large_results(
+            trajectory,
+            output_path=output_path,
+            inline_result_bytes=inline_result_bytes,
+        )
         warning_count += len(trajectory["summary"]["warnings"])
         filename = f"{_safe_name(task_id)}.trajectory.json"
         (output_path / filename).write_text(

@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .DeepRead.agent import JsonlLogger, run_agent
+from agentic_rag_evolve.telemetry import JsonlTraceWriter, ScopedTraceWriter
+
+from .DeepRead.agent import run_agent
 from .DeepRead.ports import ChatModel, EmbeddingModel, Reranker
 from .DeepRead.runtime_state import token_tracker
 from .DeepRead.tool import DocIndex, load_corpus
@@ -51,19 +53,6 @@ class DeepReadQueryResult:
         }
 
 
-class _ScopedLogger:
-    def __init__(self, logger: JsonlLogger, run_id: str | None, task_id: str | None) -> None:
-        self._logger = logger
-        self._scope = {
-            key: value
-            for key, value in {"run_id": run_id, "task_id": task_id}.items()
-            if value is not None
-        }
-
-    def log(self, event: str, **fields: Any) -> None:
-        self._logger.log(event, **self._scope, **fields)
-
-
 class GlobalDeepReadRuntime:
     """Load one shared corpus index and execute DeepRead queries against it.
 
@@ -91,7 +80,7 @@ class GlobalDeepReadRuntime:
         self.embedding_model = embedding_model
         self.reranker = reranker
         self.run_id = run_id
-        self._logger: JsonlLogger | None = None
+        self._logger: JsonlTraceWriter | None = None
         self._logger_lock = threading.Lock()
         self._doc_index: DocIndex | None = None
         self._index_lock = threading.Lock()
@@ -122,13 +111,12 @@ class GlobalDeepReadRuntime:
         with self._index_lock:
             self._doc_index = None
 
-    def _get_logger(self) -> JsonlLogger:
+    def _get_logger(self) -> JsonlTraceWriter:
         if self._logger is not None:
             return self._logger
         with self._logger_lock:
             if self._logger is None:
-                self.trace_path.parent.mkdir(parents=True, exist_ok=True)
-                self._logger = JsonlLogger(str(self.trace_path))
+                self._logger = JsonlTraceWriter(self.trace_path)
         return self._logger
 
     def write_document_map(self, output_path: Path) -> None:
@@ -149,7 +137,10 @@ class GlobalDeepReadRuntime:
 
         token_tracker.reset()
         retrieved_texts: list[str] = []
-        logger = _ScopedLogger(self._get_logger(), self.run_id, task_id)
+        logger = ScopedTraceWriter(
+            self._get_logger(),
+            {"run_id": self.run_id, "task_id": task_id},
+        )
 
         answer = run_agent(
             chat_model=self.chat_model,

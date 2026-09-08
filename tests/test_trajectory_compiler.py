@@ -42,9 +42,9 @@ class TrajectoryCompilerTest(unittest.TestCase):
             )
 
             self.assertEqual(report.unassigned_event_count, 0)
-            self.assertEqual(trajectory["schema_version"], "deepread-trajectory-v1")
-            self.assertEqual(trajectory["events"][3]["parent_id"], "step_0003")
-            self.assertEqual(trajectory["events"][0]["payload"]["omitted_fields"], ["context_delta_preview"])
+            self.assertEqual(trajectory["schema_version"], "deepread-trajectory-v2")
+            self.assertEqual(trajectory["turns"][0]["tools"][0]["result"]["results"][0]["text"], "Revenue")
+            self.assertEqual(trajectory["turns"][0]["raw_event_range"]["count"], 5)
             self.assertNotIn("large duplicate", json.dumps(trajectory))
             self.assertEqual(trajectory["summary"]["retrieved_doc_ids"], ["3"])
             self.assertEqual(trajectory["summary"]["terminal_event"], "answer.final")
@@ -95,7 +95,8 @@ class TrajectoryCompilerTest(unittest.TestCase):
                 output_path=root / "compiled",
             )
             trajectory = json.loads((root / "compiled" / "q1.trajectory.json").read_text())
-            self.assertEqual(trajectory["events"][3]["parent_id"], "step_0003")
+            self.assertEqual(trajectory["turns"][0]["tools"][0]["call_id"], "c1")
+            self.assertEqual(trajectory["turns"][0]["tools"][0]["result"], {"results": []})
             self.assertIn(
                 "legacy_inferred_tool_parent:legacy_000004",
                 trajectory["summary"]["warnings"],
@@ -113,6 +114,35 @@ class TrajectoryCompilerTest(unittest.TestCase):
                     prediction_path=root / "missing-predictions.jsonl",
                     output_path=output,
                 )
+
+    def test_externalizes_large_tool_result_without_losing_content(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prediction = {"task_id": "q1", "question": "Q", "status": "ok", "answer": "A"}
+            (root / "predictions.jsonl").write_text(json.dumps(prediction) + "\n")
+            events = [
+                {"event": "llm_request", "task_id": "q1", "round": 1},
+                {"event": "tool_call", "task_id": "q1", "tool": "get_doc_structure", "tool_call_id": "c1"},
+                {"event": "tool_result", "task_id": "q1", "tool": "get_doc_structure", "tool_call_id": "c1", "result": {"ok": True, "structure": "x" * 100}},
+                {"event": "final_answer", "task_id": "q1", "answer": "A"},
+            ]
+            (root / "trace.jsonl").write_text(
+                "".join(json.dumps(event) + "\n" for event in events)
+            )
+            output = root / "compiled"
+            compile_trajectories(
+                trace_path=root / "trace.jsonl",
+                prediction_path=root / "predictions.jsonl",
+                output_path=output,
+                inline_result_bytes=20,
+            )
+            trajectory = json.loads((output / "q1.trajectory.json").read_text())
+            tool = trajectory["turns"][0]["tools"][0]
+            payload_path = output / tool["result_ref"]["path"]
+
+            self.assertNotIn("result", tool)
+            self.assertEqual(json.loads(payload_path.read_text()), events[2]["result"])
+            self.assertEqual(tool["result_ref"]["bytes"], len(payload_path.read_bytes()))
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from systems.deepread.DeepRead.agent.logger import JsonlLogger
+from agentic_rag_evolve.telemetry import JsonlTraceWriter
 from systems.deepread.DeepRead.agent.runner import run_agent
 from systems.deepread.DeepRead.tool.retrieval import DocIndex
 
@@ -70,7 +70,7 @@ class ProviderBoundaryTest(unittest.TestCase):
                 chat_model=model,
                 doc_index=index,
                 user_question="question",
-                logger=JsonlLogger(str(Path(directory) / "trace.jsonl")),
+                logger=JsonlTraceWriter(Path(directory) / "trace.jsonl"),
                 max_rounds=1,
             )
         self.assertEqual(answer, "answer")
@@ -111,7 +111,7 @@ class ProviderBoundaryTest(unittest.TestCase):
                 chat_model=ToolCallingChatModel(),
                 doc_index=index,
                 user_question="question",
-                logger=JsonlLogger(str(trace_path)),
+                logger=JsonlTraceWriter(trace_path),
                 max_rounds=2,
             )
             events = [json.loads(line) for line in trace_path.read_text().splitlines()]

@@ -10,7 +10,7 @@ from .llm import (
     sanitize_for_vllm,
     should_sanitize_for_vllm,
 )
-from ..ports import ChatModel, EmbeddingModel, Reranker
+from ..ports import ChatModel, EmbeddingModel, EventLogger, Reranker
 from ..prompt.system import build_system_prompt
 from ..runtime_state import token_tracker
 from ..tool.fallback import fallback_tool_calls_from_text, strip_function_calls_block_any, strip_inline_tool_calls
@@ -21,7 +21,7 @@ def run_agent(
     chat_model: ChatModel,
     doc_index: DocIndex,
     user_question: str,
-    logger: JsonlLogger,
+    logger: EventLogger,
     max_rounds: int = 50,
     temperature: float = 0.0,
     enable_multimodal: bool = False,

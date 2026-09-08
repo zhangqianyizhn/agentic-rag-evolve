@@ -15,11 +15,18 @@ def main() -> int:
     parser.add_argument("--trace", type=Path, required=True)
     parser.add_argument("--predictions", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--inline-result-bytes",
+        type=int,
+        default=16_000,
+        help="Externalize tool results larger than this many UTF-8 JSON bytes",
+    )
     args = parser.parse_args()
     report = compile_trajectories(
         trace_path=args.trace,
         prediction_path=args.predictions,
         output_path=args.output,
+        inline_result_bytes=args.inline_result_bytes,
     )
     print(json.dumps(report.to_dict(), ensure_ascii=False))
     return 1 if report.unassigned_event_count else 0

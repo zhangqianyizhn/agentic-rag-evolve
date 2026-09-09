@@ -28,6 +28,8 @@
 
 `baseline_recall_disagreement` 比较 evaluator 的历史兼容 Recall 与诊断侧局部窗口 canonical coverage。它提示 HTML/Markdown 表达、retrieved-text 收集或 evaluator 对齐需要检查，不自动证明 evaluator 存在缺陷。
 
+即使 judge 得分为 4，`baseline_recall_disagreement` 仍优先路由为 `evaluation_suspicious`，避免语义正确答案掩盖评测协议问题。FinanceBench 00517 的真实调用记录见 [实验记录](experiments/2026-09-09-financebench-00517-triage.md)。
+
 ## 报告
 
 一个或多个 bundle 可以汇总为紧凑报告：

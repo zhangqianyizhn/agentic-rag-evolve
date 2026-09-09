@@ -67,6 +67,19 @@ class FailureSignalsTest(unittest.TestCase):
             ],
         )
 
+    def test_correct_judge_does_not_hide_evaluator_disagreement(self) -> None:
+        result = self._analyze(
+            judge_status="ok",
+            judge_score=4,
+            baseline_recall=0.0,
+            candidate_recall=1.0,
+            path="read",
+        )
+
+        self.assertEqual(result["triage"], "evaluation_suspicious")
+        self.assertTrue(result["is_bad_case"])
+        self.assertIn("judged_correct", {item["code"] for item in result["signals"]})
+
     def test_incorrect_judge_outcome_takes_priority_over_metric_disagreement(self) -> None:
         result = self._analyze(
             judge_status="ok",

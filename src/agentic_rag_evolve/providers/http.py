@@ -12,6 +12,34 @@ import tiktoken
 from agentic_rag_evolve.telemetry.context import emit_trace
 
 
+def _response_error_summary(response: requests.Response) -> str:
+    """Return bounded provider diagnostics without echoing request data."""
+
+    parts = [f"HTTP {response.status_code}"]
+    try:
+        body = response.json()
+    except (ValueError, requests.JSONDecodeError):
+        body = None
+    if isinstance(body, Mapping):
+        error = body.get("error")
+        if isinstance(error, Mapping):
+            code = error.get("code")
+            message = error.get("message")
+        else:
+            code = body.get("code")
+            message = body.get("message")
+        if code:
+            parts.append(f"code={str(code)[:120]}")
+        if message:
+            parts.append(f"message={str(message)[:500]}")
+    request_id = response.headers.get("x-request-id") or response.headers.get(
+        "x-tt-logid"
+    )
+    if request_id:
+        parts.append(f"request_id={request_id[:160]}")
+    return "; ".join(parts)
+
+
 def _count_tokens(value: Any) -> int:
     encoding = tiktoken.get_encoding("cl100k_base")
     return len(encoding.encode(str(value)))
@@ -78,7 +106,10 @@ class OpenAICompatibleChatModel:
                         will_retry=True,
                     )
                     continue
-                response.raise_for_status()
+                if status >= 400:
+                    raise requests.HTTPError(
+                        _response_error_summary(response), response=response
+                    )
                 result = response.json()
                 emit_trace(
                     "llm_http_success",

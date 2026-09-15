@@ -18,13 +18,23 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--max-rounds", type=int, default=12)
+    parser.add_argument("--max-tool-calls", type=int)
+    parser.add_argument("--max-output-tokens", type=int)
+    parser.add_argument("--request-timeout", type=int, default=1800)
+    parser.add_argument("--request-max-retries", type=int, default=0)
     args = parser.parse_args()
     report = run_diagnosis(
         bundle_path=args.bundle,
         source_root=args.source_root,
         output_path=args.output,
-        model=load_chat_model(args.env_file),
+        model=load_chat_model(
+            args.env_file,
+            timeout=args.request_timeout,
+            max_retries=args.request_max_retries,
+        ),
         max_rounds=args.max_rounds,
+        max_tool_calls=args.max_tool_calls,
+        max_output_tokens=args.max_output_tokens,
     )
     print(json.dumps(report.to_dict(), ensure_ascii=False))
     return 0 if report.status in {"ok", "skipped"} else 1

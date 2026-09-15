@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from agentic_rag_evolve.trajectory import compile_trajectories
+from agentic_rag_evolve.trajectory import DEFAULT_INLINE_RESULT_BYTES, compile_trajectories
 
 
 def main() -> int:
@@ -18,7 +18,7 @@ def main() -> int:
     parser.add_argument(
         "--inline-result-bytes",
         type=int,
-        default=16_000,
+        default=DEFAULT_INLINE_RESULT_BYTES,
         help="Externalize tool results larger than this many UTF-8 JSON bytes",
     )
     args = parser.parse_args()

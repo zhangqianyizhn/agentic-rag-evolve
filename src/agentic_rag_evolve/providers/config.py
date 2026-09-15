@@ -83,13 +83,20 @@ def load_provider_bundle(env_file: Path | None = None) -> ProviderBundle:
     )
 
 
-def load_chat_model(env_file: Path | None = None) -> OpenAICompatibleChatModel:
+def load_chat_model(
+    env_file: Path | None = None,
+    *,
+    timeout: int = 120,
+    max_retries: int = 5,
+) -> OpenAICompatibleChatModel:
     if env_file is not None:
         load_dotenv(Path(env_file), override=False)
     return OpenAICompatibleChatModel(
         model_name=_required("LLM_MODEL"),
         base_url=_required("LLM_BASE_URL"),
         api_key=_required("LLM_API_KEY"),
+        timeout=timeout,
+        max_retries=max_retries,
     )
 
 

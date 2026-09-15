@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
@@ -50,7 +51,7 @@ DIAGNOSIS_TOOLS = [
         "type": "function",
         "function": {
             "name": "read_source",
-            "description": "Read a bounded range from an allowlisted DeepRead source file.",
+            "description": "Read an allowlisted DeepRead source range; at most 240 lines are returned per call.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -83,14 +84,25 @@ DIAGNOSIS_TOOLS = [
 ]
 
 
+ANCHOR_CONTRACT = """Evidence anchors are flat JSON objects with exactly one of these shapes:
+{"kind":"trajectory","claim":"...","turn":1,"tool_call_id":"... or omit"}
+{"kind":"coverage","claim":"...","evidence_index":0,"layer":"corpus|candidate|read|answer"}
+{"kind":"evaluation","claim":"...","field":"judge.score"}
+{"kind":"source","claim":"...","path":"...","start_line":1,"end_line":20}
+{"kind":"payload","claim":"...","path":"...","offset_chars":0,"end_chars":100}
+Never nest a trajectory, coverage, evaluation, source, payload, or judge object inside an anchor. Judge facts use kind="evaluation" and a field such as "judge.score"."""
+
+
 SYSTEM_PROMPT = """You diagnose an evolvable DeepRead document-QA system from a validated bundle.
 
-Use only facts in the bundle and content returned by the provided tools. Do not invent source code, tool results, line numbers, or a fixed defect category. Separate observable manifestation from root-cause hypothesis. Find the earliest behavior that could have changed the outcome, not merely the last wrong answer. Inspect relevant source before returning status=diagnosed. Include evidence that challenges your hypothesis and a falsifiable counterfactual. Do not write a patch or choose a repair operator.
+Use only facts in the bundle and content returned by the provided tools. Do not invent source code, tool results, line numbers, or a fixed defect category. Separate observable manifestation from root-cause hypothesis. Find the earliest behavior that could have changed the outcome, not merely the last wrong answer. Inspect the smallest relevant source range before returning status=diagnosed; normally one source file is enough, and indexing/retrieval code should not be inspected unless the evidence specifically implicates it. Include evidence that challenges your hypothesis and a falsifiable counterfactual. Stop exploring once the diagnosis is supported and return the JSON. Do not write a patch or choose a repair operator.
 
 Return only one JSON object with exactly these fields:
 schema_version="deepread-diagnosis-v1"; task_id; status (diagnosed, not_agent_failure, or insufficient_evidence); failure_manifestation; earliest_intervention ({turn, tool_call_id or null, rationale} or null); root_cause_hypothesis; supporting_evidence; contradicting_evidence; counterfactual ({change, expected_observation, falsifier}); affected_sources; uncertainties.
 
-Evidence anchors have kind and claim, plus: trajectory {turn, optional tool_call_id}; coverage {evidence_index, layer}; evaluation {field}; source {path,start_line,end_line}; payload {path,offset_chars,end_chars}. affected_sources entries require path,start_line,end_line,symbol,rationale. Cite only source/payload ranges you actually read. Keep each claim focused and the complete result concise."""
+""" + ANCHOR_CONTRACT + """
+
+affected_sources entries require path,start_line,end_line,symbol,rationale. Cite only source/payload ranges you actually read. If the evidence supports a dataset or evaluation mismatch rather than an evolvable DeepRead defect, use status="not_agent_failure" and an empty affected_sources list. Keep each claim focused and the complete result concise."""
 
 
 def _diagnosis_input(bundle: Mapping[str, Any]) -> dict[str, Any]:
@@ -180,22 +192,53 @@ def _execute_tool(
     if name == "list_sources":
         return {"sources": reader.list_sources(arguments.get("component"))}
     if name == "read_source":
-        return reader.read_source(
+        start_line = int(arguments.get("start_line", 1))
+        requested_end = int(arguments.get("end_line", start_line + 239))
+        result = reader.read_source(
             str(arguments.get("path") or ""),
-            start_line=int(arguments.get("start_line", 1)),
-            end_line=int(arguments.get("end_line", 240)),
+            start_line=start_line,
+            end_line=min(requested_end, start_line + 239),
         )
+        result["has_more"] = result["end_line"] < result["total_lines"]
+        if result["end_line"] < requested_end:
+            result["requested_end_line"] = requested_end
+        return result
     if name == "read_payload":
         return reader.read_payload(
             str(arguments.get("path") or ""),
             offset_chars=int(arguments.get("offset_chars", 0)),
-            limit_chars=int(arguments.get("limit_chars", 12000)),
+            limit_chars=min(int(arguments.get("limit_chars", 12000)), 12000),
         )
     raise ValueError(f"unknown diagnosis tool: {name}")
 
 
 def _write_json(path: Path, value: Any) -> None:
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    temporary.replace(path)
+
+
+def _candidate_shape(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep failed-output structure for debugging without retaining long text."""
+
+    shape: dict[str, Any] = {
+        "status": value.get("status"),
+        "top_level_fields": sorted(str(key) for key in value),
+    }
+    for field in ("supporting_evidence", "contradicting_evidence"):
+        items = value.get(field)
+        if isinstance(items, list):
+            shape[field] = [
+                {
+                    "kind": item.get("kind"),
+                    "fields": sorted(str(key) for key in item),
+                }
+                for item in items
+                if isinstance(item, Mapping)
+            ]
+    return shape
 
 
 def run_diagnosis(
@@ -205,7 +248,9 @@ def run_diagnosis(
     output_path: Path,
     model: DiagnosisModel,
     max_rounds: int = 12,
-    max_validation_failures: int = 2,
+    max_validation_failures: int = 1,
+    max_tool_calls: int | None = None,
+    max_output_tokens: int | None = None,
 ) -> DiagnosisRunReport:
     """Run one diagnosis with restricted artifact tools and grounded output validation."""
 
@@ -213,6 +258,10 @@ def run_diagnosis(
         raise ValueError("max_rounds must be at least 1")
     if max_validation_failures < 0:
         raise ValueError("max_validation_failures must be non-negative")
+    if max_tool_calls is not None and max_tool_calls < 1:
+        raise ValueError("max_tool_calls must be at least 1")
+    if max_output_tokens is not None and max_output_tokens < 1:
+        raise ValueError("max_output_tokens must be at least 1")
     output_path = Path(output_path)
     if output_path.exists() and any(output_path.iterdir()):
         raise FileExistsError(f"diagnosis output directory must be empty: {output_path}")
@@ -230,9 +279,15 @@ def run_diagnosis(
         "model": model.model_name,
         "route": dict(route),
         "events": [],
-        "token_usage": {"input_tokens": 0, "output_tokens": 0},
+        "token_usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0,
+        },
+        "status": "running",
     }
     audit_path = output_path / "audit.json"
+    _write_json(audit_path, audit)
     if not route.get("eligible") or route.get("target") != "deepread":
         audit["status"] = "skipped"
         audit["reason"] = route.get("reason")
@@ -252,18 +307,46 @@ def run_diagnosis(
     validation_failures = 0
 
     for round_number in range(1, max_rounds + 1):
+        model_event: dict[str, Any] = {
+            "kind": "model",
+            "round": round_number,
+            "status": "pending",
+            "message_count": len(messages),
+            "request_bytes": len(
+                json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            ),
+        }
+        audit["events"].append(model_event)
+        _write_json(audit_path, audit)
+        request_payload: dict[str, Any] = {
+            "model": model.model_name,
+            "messages": messages,
+            "tools": DIAGNOSIS_TOOLS,
+            "tool_choice": "auto",
+            "temperature": 0.0,
+            "stream": False,
+        }
+        if max_output_tokens is not None:
+            request_payload["max_tokens"] = max_output_tokens
+        request_started = time.monotonic()
         try:
-            response = model.complete(
-                {
-                    "model": model.model_name,
-                    "messages": messages,
-                    "tools": DIAGNOSIS_TOOLS,
-                    "tool_choice": "auto",
-                    "temperature": 0.0,
-                    "stream": False,
-                }
+            response = model.complete(request_payload)
+        except KeyboardInterrupt:
+            model_event["status"] = "interrupted"
+            model_event["latency_seconds"] = round(
+                time.monotonic() - request_started, 3
             )
+            audit["status"] = "interrupted"
+            _write_json(audit_path, audit)
+            raise
         except Exception as exc:
+            model_event["status"] = "error"
+            model_event["latency_seconds"] = round(
+                time.monotonic() - request_started, 3
+            )
+            model_event["error"] = f"{type(exc).__name__}: {exc}"
             audit["status"] = "error"
             audit["error"] = f"{type(exc).__name__}: {exc}"
             _write_json(audit_path, audit)
@@ -279,8 +362,12 @@ def run_diagnosis(
         usage = response.get("usage") or {}
         input_tokens = int(usage.get("prompt_tokens") or 0)
         output_tokens = int(usage.get("completion_tokens") or 0)
+        reasoning_tokens = int(
+            (usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0
+        )
         audit["token_usage"]["input_tokens"] += input_tokens
         audit["token_usage"]["output_tokens"] += output_tokens
+        audit["token_usage"]["reasoning_tokens"] += reasoning_tokens
         choices = response.get("choices") or []
         message = (choices[0].get("message") or {}) if choices else {}
         content = str(message.get("content") or "")
@@ -295,10 +382,11 @@ def run_diagnosis(
         if tool_calls:
             assistant_message["tool_calls"] = tool_calls
         messages.append(assistant_message)
-        audit["events"].append(
+        model_event.update(
             {
-                "kind": "model",
-                "round": round_number,
+                "status": "ok",
+                "latency_seconds": round(time.monotonic() - request_started, 3),
+                "finish_reason": choices[0].get("finish_reason") if choices else None,
                 "requested_tools": [
                     str((call.get("function") or {}).get("name") or "")
                     for call in tool_calls
@@ -307,9 +395,11 @@ def run_diagnosis(
                 "token_usage": {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
+                    "reasoning_tokens": reasoning_tokens,
                 },
             }
         )
+        _write_json(audit_path, audit)
 
         if tool_calls:
             for call in tool_calls:
@@ -319,6 +409,10 @@ def run_diagnosis(
                 arguments: dict[str, Any] = {}
                 try:
                     name, arguments = _tool_arguments(call)
+                    if max_tool_calls is not None and tool_call_count > max_tool_calls:
+                        raise RuntimeError(
+                            "diagnosis tool budget exhausted; return the final JSON now"
+                        )
                     result = _execute_tool(reader, name, arguments)
                     ok = True
                     if name == "read_source":
@@ -342,6 +436,7 @@ def run_diagnosis(
                         **({"error": error} if error else {}),
                     }
                 )
+                _write_json(audit_path, audit)
                 messages.append(
                     {
                         "role": "tool",
@@ -352,6 +447,7 @@ def run_diagnosis(
                 )
             continue
 
+        parsed: Mapping[str, Any] | None = None
         try:
             parsed = _parse_json_object(content)
             diagnosis = validate_diagnosis(
@@ -362,7 +458,10 @@ def run_diagnosis(
             )
         except DiagnosisValidationError as exc:
             validation_failures += 1
-            audit["events"][-1]["validation_error"] = str(exc)
+            model_event["validation_error"] = str(exc)
+            if parsed is not None:
+                model_event["candidate_shape"] = _candidate_shape(parsed)
+            _write_json(audit_path, audit)
             if validation_failures > max_validation_failures:
                 audit["status"] = "validation_error"
                 audit["error"] = str(exc)
@@ -381,7 +480,8 @@ def run_diagnosis(
                     "role": "user",
                     "content": (
                         f"Your diagnosis failed validation: {exc}. Correct the cited facts "
-                        "or use the tools, then return the complete JSON object again."
+                        "or use the tools, then return the complete JSON object again.\n\n"
+                        f"{ANCHOR_CONTRACT}"
                     ),
                 }
             )

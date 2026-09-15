@@ -32,6 +32,10 @@ class OpenAICompatibleChatModel:
             raise ValueError("chat model_name must not be empty")
         if not self.api_key:
             raise ValueError("chat api_key must not be empty")
+        if self.timeout < 1:
+            raise ValueError("chat timeout must be positive")
+        if self.max_retries < 0:
+            raise ValueError("chat max_retries must be non-negative")
 
     def complete(
         self,
@@ -47,7 +51,8 @@ class OpenAICompatibleChatModel:
             **dict(self.default_headers),
         }
 
-        for attempt in range(1, self.max_retries + 1):
+        max_attempts = 1 + self.max_retries
+        for attempt in range(1, max_attempts + 1):
             if attempt > 1:
                 time.sleep(min(90, 1.5 * (2 ** (attempt - 2))))
             emit_trace(
@@ -64,7 +69,7 @@ class OpenAICompatibleChatModel:
                 )
                 status = response.status_code
                 retryable = status in {429, 500, 502, 503, 504}
-                if retryable and attempt < self.max_retries:
+                if retryable and attempt < max_attempts:
                     emit_trace(
                         "llm_http_error",
                         status_code=status,
@@ -87,7 +92,7 @@ class OpenAICompatibleChatModel:
                 )
                 return result
             except requests.RequestException as exc:
-                will_retry = attempt < self.max_retries
+                will_retry = attempt < max_attempts
                 emit_trace(
                     "llm_http_error",
                     error=str(exc),

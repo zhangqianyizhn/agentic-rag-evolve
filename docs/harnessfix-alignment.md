@@ -14,6 +14,8 @@
 
 共同主线保持一致：冻结被测系统 → 运行 → 评测 → 诊断 → 聚合计划 → 隔离修改 → train/development 验证 → 晋升或拒绝。
 
+HarnessFix 的诊断输出采用完整示例模板，但运行端只要求可解析 JSON，并在后处理中补字段、归一化类别；解析失败则生成低置信 fallback。`DefaultAgent` 会保留并重发完整 `messages`，本身没有自动压缩；实际长度控制来自 agent 主动调用带 `--char-limit` 的 trajectory/HTIR 摘要脚本。它的 GAIA 分析模型设置单次 300 秒超时和零 HTTP 重试。我们的诊断层参考这一“宽输入、稳输出”和按需读取方式，先规范化模型常见写法、最多纠错一次；HTTP 同样零重试，但长思考模型的实测默认超时放宽到 1,800 秒。差异是继续校验 trajectory/source/payload 引用真实性，且不引入预枚举缺陷类别。
+
 ## 运行边界
 
 与 HarnessFix 一致，CLI 属于稳定 benchmark harness，而不是被进化的 agent：

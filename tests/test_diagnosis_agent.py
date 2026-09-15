@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import tempfile
@@ -20,7 +21,7 @@ class FakeDiagnosisModel:
         self.calls = []
 
     def complete(self, payload):
-        self.calls.append(payload)
+        self.calls.append(copy.deepcopy(payload))
         return self.responses.pop(0)
 
 
@@ -222,10 +223,20 @@ class DiagnosisAgentTest(unittest.TestCase):
         self.assertEqual(report.rounds, 2)
         self.assertEqual(report.tool_calls, 1)
         self.assertEqual(diagnosis["status"], "diagnosed")
-        self.assertEqual(audit["token_usage"], {"input_tokens": 220, "output_tokens": 90})
+        self.assertEqual(
+            audit["token_usage"],
+            {"input_tokens": 220, "output_tokens": 90, "reasoning_tokens": 0},
+        )
         self.assertEqual(
             [(event["kind"], event["round"]) for event in audit["events"]],
             [("model", 1), ("tool", 1), ("model", 2)],
+        )
+        self.assertTrue(
+            all(
+                event["status"] == "ok"
+                for event in audit["events"]
+                if event["kind"] == "model"
+            )
         )
         self.assertNotIn("content", json.dumps(audit))
 
@@ -241,6 +252,153 @@ class DiagnosisAgentTest(unittest.TestCase):
                 observed_source_reads=[],
                 observed_payload_reads=[],
             )
+
+    def test_validation_retry_explains_flat_anchor_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle_path = self._bundle(root)
+            corrected = self._diagnosis()
+            corrected["status"] = "not_agent_failure"
+            corrected["earliest_intervention"] = None
+            corrected["supporting_evidence"] = [
+                {
+                    "kind": "evaluation",
+                    "claim": "The judge marked the answer incorrect.",
+                    "field": "judge.score",
+                }
+            ]
+            corrected["contradicting_evidence"] = []
+            corrected["affected_sources"] = []
+            invalid = dict(corrected)
+            invalid["supporting_evidence"] = [
+                {"kind": "unsupported", "claim": "The judge marked the answer incorrect."}
+            ]
+            model = FakeDiagnosisModel(
+                [
+                    {
+                        "choices": [{"message": {"content": json.dumps(invalid)}}],
+                        "usage": {},
+                    },
+                    {
+                        "choices": [{"message": {"content": json.dumps(corrected)}}],
+                        "usage": {},
+                    },
+                ]
+            )
+            output = root / "output"
+            report = run_diagnosis(
+                bundle_path=bundle_path,
+                source_root=self.source_root,
+                output_path=output,
+                model=model,
+            )
+            audit = json.loads((output / "audit.json").read_text())
+
+        self.assertEqual(report.status, "ok")
+        correction = model.calls[1]["messages"][-1]["content"]
+        self.assertIn('Judge facts use kind="evaluation"', correction)
+        self.assertEqual(
+            audit["events"][0]["candidate_shape"]["supporting_evidence"],
+            [{"kind": "unsupported", "fields": ["claim", "kind"]}],
+        )
+        self.assertNotIn("content", json.dumps(audit))
+
+    def test_validator_normalizes_nested_and_judge_anchors(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = json.loads(self._bundle(root).read_text())
+        diagnosis = self._diagnosis()
+        diagnosis["status"] = "not_agent_failure"
+        diagnosis["earliest_intervention"] = None
+        diagnosis["affected_sources"] = []
+        diagnosis["supporting_evidence"] = [
+            {
+                "kind": "evaluation",
+                "claim": "The judge score is low.",
+                "evaluation": {"field": "judge.score"},
+            }
+        ]
+        diagnosis["contradicting_evidence"] = [
+            {"kind": "judge", "claim": "The judge explains the mismatch."}
+        ]
+
+        normalized = validate_diagnosis(diagnosis, bundle=bundle)
+
+        self.assertEqual(
+            normalized["supporting_evidence"][0],
+            {
+                "kind": "evaluation",
+                "claim": "The judge score is low.",
+                "field": "judge.score",
+            },
+        )
+        self.assertEqual(
+            normalized["contradicting_evidence"][0]["field"], "judge.reasoning"
+        )
+
+    def test_source_read_is_safely_clamped_without_a_retry_round(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle_path = self._bundle(root)
+            diagnosis = self._diagnosis()
+            diagnosis["supporting_evidence"][1]["path"] = (
+                "systems/deepread/DeepRead/index/markdown_parser.py"
+            )
+            diagnosis["supporting_evidence"][1]["end_line"] = 240
+            diagnosis["affected_sources"][0]["path"] = (
+                "systems/deepread/DeepRead/index/markdown_parser.py"
+            )
+            diagnosis["affected_sources"][0]["end_line"] = 240
+            model = FakeDiagnosisModel(
+                [
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "",
+                                    "tool_calls": [
+                                        {
+                                            "id": "read-wide",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "read_source",
+                                                "arguments": json.dumps(
+                                                    {
+                                                        "path": "systems/deepread/DeepRead/index/markdown_parser.py",
+                                                        "start_line": 1,
+                                                        "end_line": 241,
+                                                    }
+                                                ),
+                                            },
+                                        }
+                                    ],
+                                }
+                            }
+                        ],
+                        "usage": {},
+                    },
+                    {
+                        "choices": [
+                            {"message": {"content": json.dumps(diagnosis)}}
+                        ],
+                        "usage": {},
+                    },
+                ]
+            )
+
+            report = run_diagnosis(
+                bundle_path=bundle_path,
+                source_root=self.source_root,
+                output_path=root / "output",
+                model=model,
+            )
+
+        tool_result = json.loads(model.calls[1]["messages"][-1]["content"])
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.rounds, 2)
+        self.assertEqual(tool_result["end_line"], 240)
+        self.assertEqual(tool_result["requested_end_line"], 241)
+        self.assertTrue(tool_result["has_more"])
 
     def test_non_deepread_route_is_skipped_without_model_call(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

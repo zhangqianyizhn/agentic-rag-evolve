@@ -6,7 +6,7 @@
 
 紧凑 trajectory 以一个 agent round 为一个 `turn`。每个 turn 合并一次模型决策以及该决策触发的全部工具交互；每个工具的 arguments/result 也在同一个对象中。正常的单次 provider attempt/success、request envelope、`context_delta_preview` 和 provider URL 不进入诊断视图。
 
-模型 reasoning/content、工具参数和工具结果保持完整。`raw_event_range` 指向组成该 turn 的首尾 raw event；每个工具额外保留 call/result event ID。超过 16 KB 的工具结果写入 `payloads/`：主 trajectory 保留类型摘要、相对路径、字节数与 SHA-256，需要时可无损回读和校验。阈值可通过 `--inline-result-bytes` 调整，设为 `0` 可外置全部非空结果。
+模型 reasoning/content、工具参数和工具结果保持完整。`raw_event_range` 指向组成该 turn 的首尾 raw event；每个工具额外保留 call/result event ID。超过 4 KB 的工具结果写入 `payloads/`：主 trajectory 保留类型摘要、相对路径、字节数与 SHA-256，需要时可无损回读和校验。较低默认值使诊断 agent 像 HarnessFix 读取 HTIR 一样按需展开大结果，而不是在首轮接收完整检索正文。阈值可通过 `--inline-result-bytes` 调整，设为 `0` 可外置全部非空结果。
 
 原始 JSONL 每行重复 `run_id`/`task_id` 是有意的：单行可以独立检索、恢复和并发归并。它不是诊断模型的输入，因此暂不采用依赖文件头状态的压缩格式。
 

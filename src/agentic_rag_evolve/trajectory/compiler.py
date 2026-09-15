@@ -30,7 +30,7 @@ EVENT_KINDS = {
     "llm_thinking_only": "model.thinking_only",
 }
 
-DEFAULT_INLINE_RESULT_BYTES = 16_000
+DEFAULT_INLINE_RESULT_BYTES = 4_000
 
 @dataclass(frozen=True, slots=True)
 class CompilationReport:

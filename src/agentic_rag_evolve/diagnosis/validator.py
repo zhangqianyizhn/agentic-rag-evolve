@@ -160,6 +160,34 @@ def _validate_anchor(
 ) -> dict[str, Any]:
     anchor = dict(_object(value, field))
     kind = str(anchor.get("kind") or "")
+    nested_kinds = ("trajectory", "coverage", "evaluation", "source", "payload")
+    nested_kind = kind if kind in nested_kinds else next(
+        (
+            candidate
+            for candidate in nested_kinds
+            if isinstance(anchor.get(candidate), Mapping)
+        ),
+        None,
+    )
+    if nested_kind is not None and isinstance(anchor.get(nested_kind), Mapping):
+        nested = dict(anchor.pop(nested_kind))
+        anchor["kind"] = nested_kind
+        for key, nested_value in nested.items():
+            anchor.setdefault(key, nested_value)
+        kind = nested_kind
+    if kind == "judge":
+        anchor["kind"] = "evaluation"
+        judge = anchor.pop("judge", None)
+        if isinstance(judge, Mapping):
+            for key, nested_value in judge.items():
+                anchor.setdefault(key, nested_value)
+        referenced_field = str(anchor.get("field") or "reasoning")
+        anchor["field"] = (
+            referenced_field
+            if referenced_field.startswith("judge.")
+            else f"judge.{referenced_field}"
+        )
+        kind = "evaluation"
     allowed = {
         "trajectory": {"kind", "claim", "turn", "tool_call_id"},
         "coverage": {"kind", "claim", "evidence_index", "layer"},

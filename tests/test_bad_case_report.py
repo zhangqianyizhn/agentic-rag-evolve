@@ -33,6 +33,11 @@ class BadCaseReportTest(unittest.TestCase):
                     "primary_signal": "candidate",
                     "layer_recall": {"corpus": 1.0, "candidate": 0.0},
                 },
+                "diagnosis_route": {
+                    "eligible": True,
+                    "target": "deepread",
+                    "reason": "Diagnose the answer failure.",
+                },
                 "signals": [
                     {
                         "code": "retrieval_candidate_miss",
@@ -63,6 +68,7 @@ class BadCaseReportTest(unittest.TestCase):
         self.assertEqual(summary["triage_counts"], {"incorrect_answer": 1, "pass": 1})
         self.assertEqual([record["task_id"] for record in records], ["q2"])
         self.assertIn("q2 — `incorrect_answer`", markdown)
+        self.assertIn("Next route: deepread", markdown)
         self.assertNotIn("q1 — `pass`", markdown)
 
     def test_rejects_duplicate_tasks(self) -> None:

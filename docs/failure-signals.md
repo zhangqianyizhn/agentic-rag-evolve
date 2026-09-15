@@ -11,6 +11,7 @@
 - `evidence_path`：corpus、candidate、read、answer 四层召回和最早缺失层；
 - `confidence`：只表示规则结论的确定性，不表示根因正确率；
 - `interpretation`：明确禁止将信号直接解释为根因或修复方案。
+- `diagnosis_route`：是否允许进入 DeepRead 诊断，以及应转交的目标模块。
 
 ## Triage 类别
 

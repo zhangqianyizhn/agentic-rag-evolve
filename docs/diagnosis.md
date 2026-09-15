@@ -1,0 +1,55 @@
+# 证据锚定诊断协议 v1
+
+## 与 HarnessFix 的关系
+
+HarnessFix 的 GAIA diagnosis prompt 要求模型从预先枚举的 component、defect class 和 fix scope 中选择，并在同一次输出中提出修复。DeepRead v1 只借鉴“轨迹分析、源码定位、结构化输出”的主线，不复制这些任务特化枚举。
+
+诊断层只回答：发生了什么、最早可以在哪里干预、哪些事实支持或反驳当前假设、什么反事实可以证伪它。修复算子和补丁留给后续 planning/repair 模块。
+
+## 运行资格
+
+`failure_signals.diagnosis_route` 在调用模型前进行分流：
+
+- `incorrect_answer`、`partial_answer`、`no_answer` 和 `execution_failure` 可以进入 DeepRead 诊断；
+- `evaluation_suspicious` 转交 evaluation review，不允许诊断 agent 在看不到 evaluator 源码时猜测 DeepRead 根因；
+- `needs_judgment` 必须先取得可靠 judge；
+- `pass` 不诊断。
+
+## 输出
+
+一个 `deepread-diagnosis-v1` 包含：
+
+- `status`：`diagnosed`、`not_agent_failure` 或 `insufficient_evidence`；
+- `failure_manifestation`：可直接观察的失败现象；
+- `earliest_intervention`：trajectory turn 和可选 tool call，以及为何这是最早干预点；
+- `root_cause_hypothesis`：开放式、可被反驳的根因假设；
+- `supporting_evidence` 与 `contradicting_evidence`；
+- `counterfactual`：行为变化、预期观测和 falsifier；
+- `affected_sources`：实际读过的源码范围和 symbol；
+- `uncertainties`。
+
+证据 anchor 只允许五种事实坐标：trajectory turn/tool、evidence coverage 层、evaluation 字段、allowlisted source 行区间、trajectory payload 字符区间。这里固定的是引用语法，不是缺陷类别。
+
+## 工具与校验
+
+诊断 agent 只能使用诊断 bundle 已声明的 `list_sources`、`read_source` 和 `read_payload`。Validator 校验：
+
+- task、turn、tool call、evidence index/layer 和 evaluation 字段真实存在；
+- source/payload 属于 bundle manifest；
+- 模型引用的 source 行或 payload 字符必须被本轮工具调用完整覆盖；
+- `diagnosed` 必须同时提供最早干预点、支持证据、反驳证据、反事实和至少一个源码范围；
+- 未知字段、过长文本和过多 anchor 被拒绝。
+
+校验失败会作为一条简短反馈返回模型，最多重试两次。`audit.json` 将一次模型响应或工具调用各记录为一个事件，只保存 tool arguments、状态、token 和验证错误，不复制初始 bundle、源码内容或模型长文本。
+
+## 命令
+
+```bash
+python runner/run_diagnosis.py \
+  --bundle <diagnostic-bundle.json> \
+  --source-root <repository-root> \
+  --output <empty-output-directory> \
+  --env-file .env
+```
+
+成功输出 `diagnosis.json` 和 `audit.json`；不符合资格的 bundle 只输出 status 为 `skipped` 的 `audit.json`，且不会调用模型。

@@ -197,12 +197,36 @@ def analyze_failure_signals(
     else:
         triage, confidence = "needs_judgment", "medium"
 
+    diagnosis_routes = {
+        "execution_failure": (True, "deepread", "Inspect whether the failure is caused by evolvable DeepRead behavior."),
+        "no_answer": (True, "deepread", "Diagnose why DeepRead did not produce an answer."),
+        "incorrect_answer": (True, "deepread", "Diagnose the answer failure against its evidence path."),
+        "partial_answer": (True, "deepread", "Diagnose the missing or inaccurate answer content."),
+        "evaluation_suspicious": (
+            False,
+            "evaluation_review",
+            "Review data/evaluator alignment before attributing a DeepRead defect.",
+        ),
+        "needs_judgment": (
+            False,
+            "answer_judge",
+            "Obtain a reliable answer judgment before DeepRead diagnosis.",
+        ),
+        "pass": (False, "none", "No accuracy failure is available for diagnosis."),
+    }
+    eligible, target, reason = diagnosis_routes[triage]
+
     return {
         "schema_version": "deepread-failure-signals-v1",
         "task_id": trajectory.get("task_id"),
         "triage": triage,
         "confidence": confidence,
         "is_bad_case": triage != "pass",
+        "diagnosis_route": {
+            "eligible": eligible,
+            "target": target,
+            "reason": reason,
+        },
         "outcome": {
             "prediction_status": status,
             "has_answer": bool(answer),

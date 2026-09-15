@@ -38,6 +38,8 @@ class FailureSignalsTest(unittest.TestCase):
         empty = self._analyze(answer="")
 
         self.assertEqual(execution["triage"], "execution_failure")
+        self.assertTrue(execution["diagnosis_route"]["eligible"])
+        self.assertEqual(execution["diagnosis_route"]["target"], "deepread")
         self.assertEqual(empty["triage"], "no_answer")
 
     def test_judge_outcomes_drive_answer_triage(self) -> None:
@@ -58,6 +60,8 @@ class FailureSignalsTest(unittest.TestCase):
         )
 
         self.assertEqual(result["triage"], "evaluation_suspicious")
+        self.assertFalse(result["diagnosis_route"]["eligible"])
+        self.assertEqual(result["diagnosis_route"]["target"], "evaluation_review")
         self.assertEqual(
             [signal["code"] for signal in result["signals"]],
             [

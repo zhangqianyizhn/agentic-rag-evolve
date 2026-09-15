@@ -56,6 +56,7 @@ def _record(bundle: Mapping[str, Any]) -> dict[str, Any]:
         "gold_answers": evaluation.get("gold_answers") or [],
         "generated_answer": prediction.get("answer"),
         "evidence_path": failure.get("evidence_path") or {},
+        "diagnosis_route": failure.get("diagnosis_route") or {},
         "signals": failure.get("signals") or [],
         "evidence_references": [
             {
@@ -120,6 +121,9 @@ def _markdown(records: Sequence[Mapping[str, Any]], summary: Mapping[str, Any]) 
                 + ", ".join(
                     f"{layer}={value}" for layer, value in layer_recall.items()
                 ),
+                "",
+                "Next route: "
+                + str((record.get("diagnosis_route") or {}).get("target") or "unknown"),
                 "",
                 f"Bundle: `{record.get('bundle_path')}`",
             ]

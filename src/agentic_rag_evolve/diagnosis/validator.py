@@ -40,6 +40,14 @@ def _list(value: Any, field: str, *, maximum: int = 8) -> Sequence[Any]:
     return value
 
 
+def _string_list(value: Any, field: str, *, maximum: int = 8) -> Sequence[Any]:
+    """Normalize one model-produced string without weakening item validation."""
+
+    if isinstance(value, str):
+        value = [value]
+    return _list(value, field, maximum=maximum)
+
+
 def _text(value: Any, field: str, *, maximum: int, required: bool = True) -> str:
     if not isinstance(value, str):
         raise DiagnosisValidationError(f"{field} must be a string")
@@ -277,7 +285,7 @@ def validate_diagnosis(
     _text(
         diagnosis.get("failure_manifestation"),
         "failure_manifestation",
-        maximum=500,
+        maximum=1_500,
     )
     _text(
         diagnosis.get("root_cause_hypothesis"),
@@ -346,7 +354,9 @@ def validate_diagnosis(
             field=f"affected_sources[{index}]",
         )
 
-    uncertainties = _list(diagnosis.get("uncertainties"), "uncertainties", maximum=8)
+    uncertainties = _string_list(
+        diagnosis.get("uncertainties"), "uncertainties", maximum=8
+    )
     diagnosis["uncertainties"] = [
         _text(item, f"uncertainties[{index}]", maximum=500)
         for index, item in enumerate(uncertainties)

@@ -461,6 +461,7 @@ def run_diagnosis(
             model_event["validation_error"] = str(exc)
             if parsed is not None:
                 model_event["candidate_shape"] = _candidate_shape(parsed)
+                _write_json(output_path / "candidate.json", parsed)
             _write_json(audit_path, audit)
             if validation_failures > max_validation_failures:
                 audit["status"] = "validation_error"

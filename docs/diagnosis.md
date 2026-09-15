@@ -28,6 +28,8 @@ HarnessFix 的 GAIA diagnosis prompt 要求模型从预先枚举的 component、
 - `affected_sources`：实际读过的源码范围和 symbol；
 - `uncertainties`。
 
+协议会机械归一化模型偶尔输出的单个 `uncertainties` 字符串为单元素数组；这种处理不改变诊断语义。证据锚点、读取范围、轨迹节点和源码白名单仍执行严格校验。若一个可解析候选未通过校验，会另存为 `candidate.json`，便于修正协议后重新验证，而无需从审计摘要中猜测模型原文。
+
 证据 anchor 只允许五种事实坐标：trajectory turn/tool、evidence coverage 层、evaluation 字段、allowlisted source 行区间、trajectory payload 字符区间。这里固定的是引用语法，不是缺陷类别。
 
 ## 工具与校验

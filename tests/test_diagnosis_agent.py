@@ -293,6 +293,7 @@ class DiagnosisAgentTest(unittest.TestCase):
                 model=model,
             )
             audit = json.loads((output / "audit.json").read_text())
+            retained_candidate = json.loads((output / "candidate.json").read_text())
 
         self.assertEqual(report.status, "ok")
         correction = model.calls[1]["messages"][-1]["content"]
@@ -301,6 +302,7 @@ class DiagnosisAgentTest(unittest.TestCase):
             audit["events"][0]["candidate_shape"]["supporting_evidence"],
             [{"kind": "unsupported", "fields": ["claim", "kind"]}],
         )
+        self.assertEqual(retained_candidate, invalid)
         self.assertNotIn("content", json.dumps(audit))
 
     def test_validator_normalizes_nested_and_judge_anchors(self) -> None:
@@ -335,6 +337,29 @@ class DiagnosisAgentTest(unittest.TestCase):
         self.assertEqual(
             normalized["contradicting_evidence"][0]["field"], "judge.reasoning"
         )
+
+    def test_validator_normalizes_single_uncertainty_string(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = json.loads(self._bundle(Path(directory)).read_text())
+        diagnosis = self._diagnosis()
+        diagnosis["uncertainties"] = "The annotation convention remains ambiguous."
+
+        normalized = validate_diagnosis(diagnosis, bundle=bundle)
+
+        self.assertEqual(
+            normalized["uncertainties"],
+            ["The annotation convention remains ambiguous."],
+        )
+
+    def test_validator_allows_detailed_failure_manifestation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = json.loads(self._bundle(Path(directory)).read_text())
+        diagnosis = self._diagnosis()
+        diagnosis["failure_manifestation"] = "x" * 1_000
+
+        normalized = validate_diagnosis(diagnosis, bundle=bundle)
+
+        self.assertEqual(len(normalized["failure_manifestation"]), 1_000)
 
     def test_source_read_is_safely_clamped_without_a_retry_round(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -9,7 +9,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from agentic_rag_evolve.providers import ProviderBundle
 from systems.deepread.runtime import DeepReadConfig, GlobalDeepReadRuntime
@@ -67,6 +67,7 @@ def run_financebench(
     providers: ProviderBundle,
     config: DeepReadConfig,
     limit: int | None = None,
+    task_ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     output_path = Path(output_path)
     if output_path.exists() and any(output_path.iterdir()):
@@ -74,6 +75,17 @@ def run_financebench(
     output_path.mkdir(parents=True, exist_ok=True)
 
     queries = load_financebench_queries(dataset_path)
+    if task_ids is not None:
+        requested = [str(task_id) for task_id in task_ids]
+        if not requested:
+            raise ValueError("task_ids must not be empty when provided")
+        if len(set(requested)) != len(requested):
+            raise ValueError("task_ids contains duplicates")
+        by_id = {query.task_id: query for query in queries}
+        missing = [task_id for task_id in requested if task_id not in by_id]
+        if missing:
+            raise ValueError(f"task_ids not found in dataset: {missing}")
+        queries = tuple(by_id[task_id] for task_id in requested)
     if limit is not None:
         if limit < 1:
             raise ValueError("limit must be at least 1")

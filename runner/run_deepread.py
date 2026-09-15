@@ -19,6 +19,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--limit", type=int)
+    parser.add_argument(
+        "--task-id",
+        action="append",
+        help="Run only this exact dataset task ID; repeat to preserve a chosen order",
+    )
     parser.add_argument("--max-rounds", type=int, default=50)
     parser.add_argument("--retrieval-topk", type=int, default=5)
     args = parser.parse_args()
@@ -33,6 +38,7 @@ def main() -> int:
             retrieval_topk=args.retrieval_topk,
         ),
         limit=args.limit,
+        task_ids=args.task_id,
     )
     print(json.dumps(summary, ensure_ascii=False))
     return 0 if not summary["failed"] else 1

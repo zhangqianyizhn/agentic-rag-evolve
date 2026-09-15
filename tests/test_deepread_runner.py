@@ -92,6 +92,83 @@ class DeepReadRunnerTest(unittest.TestCase):
             )
             self.assertTrue(all("query_id" not in event for event in trace_events))
 
+    def test_runner_selects_exact_task_ids_in_requested_order(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = root / "data.jsonl"
+            dataset.write_text(
+                "\n".join(
+                    json.dumps(
+                        {
+                            "financebench_id": task_id,
+                            "doc_name": "report",
+                            "question": f"Question {task_id}?",
+                        }
+                    )
+                    for task_id in ("q1", "q2", "q3")
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            store = root / "store"
+            store.mkdir()
+            (store / "report_corpus.json").write_text(
+                json.dumps(
+                    {
+                        "nodes": [
+                            {
+                                "id": "0",
+                                "title": "Report",
+                                "paragraphs": ["Evidence"],
+                                "children": [],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = run_financebench(
+                dataset_path=dataset,
+                store_path=store,
+                output_path=root / "run",
+                providers=ProviderBundle(chat=FakeChat(), embedding=FakeEmbedding()),
+                config=DeepReadConfig(max_rounds=1),
+                task_ids=["q3", "q1"],
+            )
+            predictions = [
+                json.loads(line)
+                for line in (root / "run" / "predictions.jsonl").read_text().splitlines()
+            ]
+
+        self.assertEqual(summary["query_count"], 2)
+        self.assertEqual([item["task_id"] for item in predictions], ["q3", "q1"])
+
+    def test_runner_rejects_unknown_task_id_before_loading_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = root / "data.jsonl"
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "financebench_id": "q1",
+                        "doc_name": "report",
+                        "question": "Question?",
+                    }
+                )
+                + "\n"
+            )
+
+            with self.assertRaisesRegex(ValueError, "not found"):
+                run_financebench(
+                    dataset_path=dataset,
+                    store_path=root / "missing-store",
+                    output_path=root / "run",
+                    providers=ProviderBundle(chat=FakeChat(), embedding=FakeEmbedding()),
+                    config=DeepReadConfig(max_rounds=1),
+                    task_ids=["missing"],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Create an isolated DeepRead candidate")
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--test-policy", type=Path, required=True)
     parser.add_argument("--plan-id", required=True)
     parser.add_argument("--base-revision", required=True)
     parser.add_argument("--candidate-path", type=Path, required=True)
@@ -22,6 +23,7 @@ def main() -> int:
     manifest = create_candidate_worktree(
         repo_root=args.repo_root,
         plan_path=args.plan,
+        test_policy_path=args.test_policy,
         plan_id=args.plan_id,
         base_revision=args.base_revision,
         candidate_path=args.candidate_path,

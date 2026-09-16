@@ -77,7 +77,7 @@
 - [x] 声明目标 cohort、潜在副作用、允许修改范围和验证计划；
 - [x] 实现 detached worktree candidate 隔离与 manifest 冻结（真实 candidate 等待 recurring `proceed` plan）；
 - [x] 独立执行 diff/范围/静态审计；
-- 独立执行 candidate 固定测试审计；
+- [x] 独立执行 candidate 固定测试审计，并冻结测试前后源码快照；
 - [x] 实现与静态审计及冻结 plan 绑定的行为验证协议。
 
 ## M6：验证门禁与外层循环

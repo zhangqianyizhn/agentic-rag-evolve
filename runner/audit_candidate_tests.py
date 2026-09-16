@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
-"""Apply paired development/holdout/cross-dataset candidate gates."""
+"""Run a fixed test policy against one statically audited candidate."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from agentic_rag_evolve.validation import evaluate_validation_gate
+from agentic_rag_evolve.evolution import audit_candidate_tests
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check a DeepRead candidate validation gate")
-    parser.add_argument("--suite", type=Path, required=True)
+    parser = argparse.ArgumentParser(description="Audit fixed tests for a DeepRead candidate")
     parser.add_argument("--candidate-audit", type=Path, required=True)
-    parser.add_argument("--candidate-test-audit", type=Path, required=True)
-    parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--policy", type=Path, required=True)
+    parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
-        raise FileExistsError(f"refusing to overwrite validation gate: {args.output}")
-    result = evaluate_validation_gate(
-        suite_path=args.suite,
+        raise FileExistsError(f"refusing to overwrite candidate test audit: {args.output}")
+    result = audit_candidate_tests(
         candidate_audit_path=args.candidate_audit,
-        candidate_test_audit_path=args.candidate_test_audit,
-        plan_path=args.plan,
+        policy_path=args.policy,
+        python_executable=args.python,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

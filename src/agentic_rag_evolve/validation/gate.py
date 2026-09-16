@@ -210,11 +210,16 @@ def _pair_cohort(
 
 
 def evaluate_validation_gate(
-    *, suite_path: Path, candidate_audit_path: Path, plan_path: Path
+    *,
+    suite_path: Path,
+    candidate_audit_path: Path,
+    candidate_test_audit_path: Path,
+    plan_path: Path,
 ) -> dict[str, Any]:
     suite_path = Path(suite_path).resolve()
     suite = _load_object(suite_path, "validation suite")
     audit = _load_object(candidate_audit_path, "candidate audit")
+    test_audit = _load_object(candidate_test_audit_path, "candidate test audit")
     plan_bytes = Path(plan_path).read_bytes()
     plan_document = json.loads(plan_bytes)
     if not isinstance(plan_document, dict):
@@ -224,21 +229,34 @@ def evaluate_validation_gate(
     _exact(
         suite,
         {
-            "schema_version", "candidate_id", "plan_id", "gate_level",
-            "comparison_epsilon", "cohorts",
+            "schema_version", "candidate_id", "plan_id",
+            "candidate_snapshot_sha256", "gate_level", "comparison_epsilon",
+            "cohorts",
         },
         "validation suite",
     )
     if audit.get("schema_version") != "deepread-candidate-audit-v1":
         raise ValueError("unsupported candidate audit schema")
+    if test_audit.get("schema_version") != "deepread-candidate-test-audit-v1":
+        raise ValueError("unsupported candidate test audit schema")
     if plan_document.get("schema_version") != "deepread-modification-plan-v1":
         raise ValueError("unsupported modification plan schema")
     if not audit.get("passed"):
         raise ValueError("candidate static audit must pass before behavior validation")
+    if not test_audit.get("passed"):
+        raise ValueError("candidate fixed tests must pass before behavior validation")
     if suite.get("candidate_id") != audit.get("candidate_id"):
         raise ValueError("validation suite candidate_id does not match audit")
     if suite.get("plan_id") != audit.get("plan_id"):
         raise ValueError("validation suite plan_id does not match audit")
+    if suite.get("candidate_snapshot_sha256") != audit.get("candidate_snapshot_sha256"):
+        raise ValueError("validation suite candidate snapshot does not match audit")
+    for field in (
+        "candidate_id", "plan_id", "plan_sha256", "candidate_snapshot_sha256",
+        "test_policy_id", "test_policy_sha256",
+    ):
+        if test_audit.get(field) != audit.get(field):
+            raise ValueError(f"candidate test audit {field} does not match static audit")
     if hashlib.sha256(plan_bytes).hexdigest() != audit.get("plan_sha256"):
         raise ValueError("modification plan hash does not match candidate audit")
     plans = [
@@ -294,6 +312,9 @@ def evaluate_validation_gate(
         "candidate_id": suite.get("candidate_id"),
         "plan_id": suite.get("plan_id"),
         "gate_level": gate_level,
+        "candidate_snapshot_sha256": audit.get("candidate_snapshot_sha256"),
+        "test_policy_id": test_audit.get("test_policy_id"),
+        "test_policy_sha256": test_audit.get("test_policy_sha256"),
         "passed": not failures,
         "failed_cohorts": failures,
         "cohorts": cohorts,

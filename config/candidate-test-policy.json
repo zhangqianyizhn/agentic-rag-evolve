@@ -1,0 +1,14 @@
+{
+  "schema_version": "deepread-candidate-test-policy-v1",
+  "policy_id": "framework-unittest-v1",
+  "checks": [
+    {
+      "check_id": "framework-unit-tests",
+      "kind": "unittest_discover",
+      "start_directory": "tests",
+      "pattern": "test_*.py",
+      "timeout_seconds": 300,
+      "minimum_tests": 118
+    }
+  ]
+}

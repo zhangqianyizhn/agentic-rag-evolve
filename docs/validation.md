@@ -1,6 +1,12 @@
 # Candidate 行为验证协议
 
-`runner/check_validation_gate.py` 对同一批任务的 baseline 与 candidate 评测结果做逐题配对比较。它只接受已经通过静态审计、且与冻结 modification plan 哈希一致的 candidate，避免拿错 plan 或未审计代码进入行为验证。
+`runner/check_validation_gate.py` 对同一批任务的 baseline 与 candidate 评测结果做逐题配对比较。它只接受已经通过静态审计和固定测试审计、且与冻结 modification plan 及 candidate snapshot 哈希一致的 candidate，避免拿错 plan、审计后替换代码或让未测试代码进入行为验证。
+
+## 固定测试审计
+
+`runner/create_candidate.py` 在创建 worktree 时就把仓库维护的 `config/candidate-test-policy.json` ID 和 SHA256 冻结进 manifest。`runner/audit_candidate_tests.py` 只接受这份被冻结的策略；策略不接受 shell 或模型提供的命令，目前只允许框架构造 `python -m unittest discover` 参数。执行环境不继承模型 API 密钥，并把 `PYTHONPATH` 指向 candidate worktree。
+
+静态审计对 candidate HEAD、变化路径以及变化文件的内容/模式生成 snapshot SHA256。固定测试运行前后均重新计算；审计后代码变化、测试过程改写代码、非零退出、超时、无法解析测试数量或测试数量低于策略基线都会失败。完整 stdout/stderr 只保存哈希和有界尾部，避免把大日志复制到后续门禁输入。
 
 ## 两级门禁
 
@@ -27,4 +33,4 @@ HarnessFix 的 validation gate 主要以 resolved 数量决定是否通过，并
 
 ## 当前边界
 
-目前已用合成评测产物验证协议、错误拒绝路径和 promotion 成功路径。仓库中尚无满足 recurring hypothesis 与 `proceed` plan 的真实修复 candidate，因此没有伪造一次真实晋升结果。candidate 的固定测试执行审计、accepted/rejected 持久化和外层循环仍属于后续实现。
+目前已用合成评测产物验证协议、错误拒绝路径和 promotion 成功路径。仓库中尚无满足 recurring hypothesis 与 `proceed` plan 的真实修复 candidate，因此没有伪造一次真实晋升结果。accepted/rejected 持久化和外层循环仍属于后续实现。

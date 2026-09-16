@@ -37,6 +37,21 @@ def _write_plan(root: Path, decision: str = "proceed") -> Path:
     return path
 
 
+def _write_policy(root: Path) -> Path:
+    path = root / "test-policy.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": "deepread-candidate-test-policy-v1",
+                "policy_id": "unit-v1",
+                "checks": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 class CandidateIsolationTest(unittest.TestCase):
     def test_create_candidate_uses_detached_exact_commit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -44,6 +59,7 @@ class CandidateIsolationTest(unittest.TestCase):
             repo = root / "repo"
             repo.mkdir()
             plan = _write_plan(root)
+            policy = _write_policy(root)
             candidate = root / "candidate"
             manifest_path = root / "artifacts" / "manifest.json"
             commands = []
@@ -56,6 +72,7 @@ class CandidateIsolationTest(unittest.TestCase):
             manifest = create_candidate_worktree(
                 repo_root=repo,
                 plan_path=plan,
+                test_policy_path=policy,
                 plan_id="plan-1",
                 base_revision="main",
                 candidate_path=candidate,
@@ -65,6 +82,7 @@ class CandidateIsolationTest(unittest.TestCase):
 
         self.assertEqual(manifest["base_commit"], BASE_COMMIT)
         self.assertEqual(manifest["isolation"], "detached_git_worktree")
+        self.assertEqual(manifest["test_policy_id"], "unit-v1")
         self.assertEqual(commands[1][-2:], [str(candidate.resolve()), BASE_COMMIT])
         self.assertIn("--detach", commands[1])
 
@@ -74,11 +92,13 @@ class CandidateIsolationTest(unittest.TestCase):
             repo = root / "repo"
             repo.mkdir()
             plan = _write_plan(root, "defer")
+            policy = _write_policy(root)
 
             with self.assertRaisesRegex(ValueError, "not approved to proceed"):
                 create_candidate_worktree(
                     repo_root=repo,
                     plan_path=plan,
+                    test_policy_path=policy,
                     plan_id="plan-1",
                     base_revision="main",
                     candidate_path=root / "candidate",
@@ -91,11 +111,14 @@ class CandidateIsolationTest(unittest.TestCase):
         (candidate / ALLOWED_PATH).write_text("value = 1\n", encoding="utf-8")
         plan_path = _write_plan(root)
         plan_sha = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+        policy_path = _write_policy(root)
         manifest = {
             "schema_version": "deepread-candidate-manifest-v1",
             "candidate_id": "candidate-1",
             "plan_id": "plan-1",
             "plan_sha256": plan_sha,
+            "test_policy_id": "unit-v1",
+            "test_policy_sha256": hashlib.sha256(policy_path.read_bytes()).hexdigest(),
             "base_commit": BASE_COMMIT,
             "candidate_path": str(candidate),
         }
@@ -125,6 +148,8 @@ class CandidateIsolationTest(unittest.TestCase):
 
         self.assertTrue(result["passed"])
         self.assertEqual(result["changed_paths"], [ALLOWED_PATH])
+        self.assertEqual(result["candidate_path"], str((root / "candidate").resolve()))
+        self.assertEqual(len(result["candidate_snapshot_sha256"]), 64)
         self.assertEqual(result["violations"], [])
 
     def test_audit_reports_scope_budget_and_syntax_violations(self) -> None:

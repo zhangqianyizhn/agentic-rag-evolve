@@ -45,10 +45,24 @@ def _commit(repo_root: Path, revision: str, runner: CommandRunner) -> str:
     return commit
 
 
+def _load_test_policy(path: Path) -> tuple[str, str]:
+    data = Path(path).read_bytes()
+    document = json.loads(data)
+    if not isinstance(document, dict) or document.get("schema_version") != (
+        "deepread-candidate-test-policy-v1"
+    ):
+        raise ValueError("unsupported candidate test policy schema")
+    policy_id = str(document.get("policy_id") or "").strip()
+    if not policy_id:
+        raise ValueError("candidate test policy has no policy_id")
+    return policy_id, hashlib.sha256(data).hexdigest()
+
+
 def create_candidate_worktree(
     *,
     repo_root: Path,
     plan_path: Path,
+    test_policy_path: Path,
     plan_id: str,
     base_revision: str,
     candidate_path: Path,
@@ -70,6 +84,7 @@ def create_candidate_worktree(
         raise ValueError("candidate manifest must be stored outside the worktree")
 
     document, plan, plan_sha256 = _load_plan(Path(plan_path), plan_id)
+    test_policy_id, test_policy_sha256 = _load_test_policy(Path(test_policy_path))
     base_commit = _commit(repo_root, base_revision, command_runner)
     candidate_path.parent.mkdir(parents=True, exist_ok=True)
     command_runner(
@@ -90,6 +105,8 @@ def create_candidate_worktree(
         "cohort_id": document.get("cohort_id"),
         "plan_id": plan_id,
         "plan_sha256": plan_sha256,
+        "test_policy_id": test_policy_id,
+        "test_policy_sha256": test_policy_sha256,
         "base_commit": base_commit,
         "source_repo": str(repo_root),
         "candidate_path": str(candidate_path),

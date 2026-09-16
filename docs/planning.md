@@ -82,3 +82,7 @@ python runner/run_modification_planning.py \
 - changed Python 文件可编译，且 `git diff --check` 通过。
 
 本阶段只实现隔离和静态审计，不会在没有 recurring `proceed` plan 时创建真实 candidate。行为评测、development/holdout 运行和晋升/回滚属于 M6 validation gate。
+
+## Candidate 固定测试审计
+
+candidate 创建时同时冻结固定测试策略的 ID/SHA256。静态审计再冻结 candidate HEAD、变化路径和变化文件内容形成的 snapshot SHA256。`runner/audit_candidate_tests.py` 只执行这份仓库维护的固定测试策略，不接受 modification agent 提供的命令，并在测试前后检查 snapshot 未变化。行为验证必须同时匹配 plan SHA256、测试策略 SHA256、candidate snapshot 和通过的固定测试审计。

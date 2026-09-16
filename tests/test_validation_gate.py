@@ -34,6 +34,7 @@ class ValidationGateTest(unittest.TestCase):
             "schema_version": "deepread-validation-suite-v1",
             "candidate_id": "candidate-1",
             "plan_id": "plan-1",
+            "candidate_snapshot_sha256": "c" * 64,
             "gate_level": "development",
             "comparison_epsilon": 1e-9,
             "cohorts": [
@@ -85,19 +86,44 @@ class ValidationGateTest(unittest.TestCase):
                     "candidate_id": "candidate-1",
                     "plan_id": "plan-1",
                     "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+                    "candidate_snapshot_sha256": "c" * 64,
+                    "test_policy_id": "unit-v1",
+                    "test_policy_sha256": "d" * 64,
                     "passed": True,
                 }
             ),
             encoding="utf-8",
         )
-        return suite_path, audit_path, plan_path
+        test_audit_path = root / "candidate-test-audit.json"
+        test_audit_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "deepread-candidate-test-audit-v1",
+                    "candidate_id": "candidate-1",
+                    "plan_id": "plan-1",
+                    "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+                    "candidate_snapshot_sha256": "c" * 64,
+                    "test_policy_id": "unit-v1",
+                    "test_policy_sha256": "d" * 64,
+                    "passed": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return suite_path, audit_path, plan_path, test_audit_path
+
+    def _evaluate(self, paths):
+        return evaluate_validation_gate(
+            suite_path=paths[0],
+            candidate_audit_path=paths[1],
+            plan_path=paths[2],
+            candidate_test_audit_path=paths[3],
+        )
 
     def test_gate_passes_improved_development_and_stable_holdout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             paths = self._write_inputs(Path(directory))
-            result = evaluate_validation_gate(
-                suite_path=paths[0], candidate_audit_path=paths[1], plan_path=paths[2]
-            )
+            result = self._evaluate(paths)
 
         self.assertTrue(result["passed"])
         development = result["cohorts"][0]
@@ -107,9 +133,7 @@ class ValidationGateTest(unittest.TestCase):
     def test_gate_fails_holdout_regression_and_cost(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             paths = self._write_inputs(Path(directory), costly=True, regress=True)
-            result = evaluate_validation_gate(
-                suite_path=paths[0], candidate_audit_path=paths[1], plan_path=paths[2]
-            )
+            result = self._evaluate(paths)
 
         self.assertFalse(result["passed"])
         holdout = result["cohorts"][1]
@@ -132,6 +156,7 @@ class ValidationGateTest(unittest.TestCase):
                     suite_path=paths[0],
                     candidate_audit_path=paths[1],
                     plan_path=paths[2],
+                    candidate_test_audit_path=paths[3],
                 )
 
     def test_test_role_is_rejected(self) -> None:
@@ -147,6 +172,7 @@ class ValidationGateTest(unittest.TestCase):
                     suite_path=paths[0],
                     candidate_audit_path=paths[1],
                     plan_path=paths[2],
+                    candidate_test_audit_path=paths[3],
                 )
 
     def test_promotion_gate_requires_cross_dataset_cohort(self) -> None:
@@ -162,6 +188,7 @@ class ValidationGateTest(unittest.TestCase):
                     suite_path=paths[0],
                     candidate_audit_path=paths[1],
                     plan_path=paths[2],
+                    candidate_test_audit_path=paths[3],
                 )
 
     def test_promotion_gate_accepts_disjoint_cross_dataset_cohort(self) -> None:
@@ -193,9 +220,7 @@ class ValidationGateTest(unittest.TestCase):
             )
             paths[0].write_text(json.dumps(suite))
 
-            result = evaluate_validation_gate(
-                suite_path=paths[0], candidate_audit_path=paths[1], plan_path=paths[2]
-            )
+            result = self._evaluate(paths)
 
         self.assertTrue(result["passed"])
         self.assertEqual(result["gate_level"], "promotion")
@@ -213,6 +238,7 @@ class ValidationGateTest(unittest.TestCase):
                     suite_path=paths[0],
                     candidate_audit_path=paths[1],
                     plan_path=paths[2],
+                    candidate_test_audit_path=paths[3],
                 )
 
     def test_metric_must_be_normalized(self) -> None:
@@ -228,6 +254,7 @@ class ValidationGateTest(unittest.TestCase):
                     suite_path=paths[0],
                     candidate_audit_path=paths[1],
                     plan_path=paths[2],
+                    candidate_test_audit_path=paths[3],
                 )
 
     def test_missing_primary_metric_is_not_silently_replaced(self) -> None:
@@ -243,6 +270,7 @@ class ValidationGateTest(unittest.TestCase):
                     suite_path=paths[0],
                     candidate_audit_path=paths[1],
                     plan_path=paths[2],
+                    candidate_test_audit_path=paths[3],
                 )
 
     def test_static_audit_must_pass_first(self) -> None:
@@ -258,7 +286,30 @@ class ValidationGateTest(unittest.TestCase):
                     suite_path=paths[0],
                     candidate_audit_path=paths[1],
                     plan_path=paths[2],
+                    candidate_test_audit_path=paths[3],
                 )
+
+    def test_fixed_tests_must_pass_before_behavior_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root)
+            test_audit = json.loads(paths[3].read_text())
+            test_audit["passed"] = False
+            paths[3].write_text(json.dumps(test_audit))
+
+            with self.assertRaisesRegex(ValueError, "fixed tests must pass"):
+                self._evaluate(paths)
+
+    def test_fixed_test_snapshot_must_match_static_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root)
+            test_audit = json.loads(paths[3].read_text())
+            test_audit["candidate_snapshot_sha256"] = "e" * 64
+            paths[3].write_text(json.dumps(test_audit))
+
+            with self.assertRaisesRegex(ValueError, "snapshot"):
+                self._evaluate(paths)
 
 
 if __name__ == "__main__":

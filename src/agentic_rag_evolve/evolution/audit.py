@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -39,6 +40,34 @@ def collect_changed_paths(
         ]
     )
     return sorted(_nul_paths(tracked.stdout) | _nul_paths(untracked.stdout))
+
+
+def candidate_snapshot_sha256(
+    candidate_path: Path, *, head_commit: str, changed_paths: Sequence[str]
+) -> str:
+    """Hash the audited source state without depending on Git diff formatting."""
+
+    candidate_path = Path(candidate_path).resolve()
+    entries = []
+    for relative in sorted(changed_paths):
+        path = candidate_path / relative
+        if path.is_symlink():
+            entry = {"path": relative, "kind": "symlink", "target": str(path.readlink())}
+        elif not path.exists():
+            entry = {"path": relative, "kind": "deleted"}
+        elif path.is_file():
+            entry = {
+                "path": relative,
+                "kind": "file",
+                "mode": stat.S_IMODE(path.stat().st_mode),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        else:
+            entry = {"path": relative, "kind": "unsupported"}
+        entries.append(entry)
+    payload = {"head_commit": head_commit, "changed_entries": entries}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _under(path: str, roots: Sequence[str]) -> bool:
@@ -83,6 +112,9 @@ def audit_candidate(
         ["git", "-C", str(candidate_path), "rev-parse", "HEAD"]
     ).stdout.strip()
     changed_paths = collect_changed_paths(candidate_path, command_runner)
+    snapshot_sha256 = candidate_snapshot_sha256(
+        candidate_path, head_commit=head, changed_paths=changed_paths
+    )
     scope = plan.get("edit_scope") or {}
     allowed_paths = set(str(item) for item in scope.get("allowed_paths") or [])
     forbidden_roots = [str(item) for item in scope.get("forbidden_roots") or []]
@@ -136,8 +168,12 @@ def audit_candidate(
         "candidate_id": manifest.get("candidate_id"),
         "plan_id": manifest.get("plan_id"),
         "plan_sha256": manifest.get("plan_sha256"),
+        "test_policy_id": manifest.get("test_policy_id"),
+        "test_policy_sha256": manifest.get("test_policy_sha256"),
         "base_commit": manifest.get("base_commit"),
         "head_commit": head,
+        "candidate_path": str(candidate_path),
+        "candidate_snapshot_sha256": snapshot_sha256,
         "passed": not violations,
         "changed_paths": changed_paths,
         "changed_file_count": len(changed_paths),

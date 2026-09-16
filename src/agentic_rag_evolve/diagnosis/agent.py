@@ -88,8 +88,8 @@ ANCHOR_CONTRACT = """Evidence anchors are flat JSON objects with exactly one of 
 {"kind":"trajectory","claim":"...","turn":1,"tool_call_id":"... or omit"}
 {"kind":"coverage","claim":"...","evidence_index":0,"layer":"corpus|candidate|read|answer"}
 {"kind":"evaluation","claim":"...","field":"judge.score"}
-{"kind":"source","claim":"...","path":"...","start_line":1,"end_line":20}
-{"kind":"payload","claim":"...","path":"...","offset_chars":0,"end_chars":100}
+{"kind":"source","claim":"...","quote":"exact text inside the cited lines","path":"...","start_line":1,"end_line":20}
+{"kind":"payload","claim":"...","quote":"exact text inside the cited characters","path":"...","offset_chars":0,"end_chars":100}
 Never nest a trajectory, coverage, evaluation, source, payload, or judge object inside an anchor. Judge facts use kind="evaluation" and a field such as "judge.score"."""
 
 

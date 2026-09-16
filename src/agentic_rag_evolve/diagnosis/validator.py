@@ -120,12 +120,54 @@ def _was_read(
     )
 
 
+def _observed_excerpt(
+    *,
+    path: str,
+    start: int,
+    end: int,
+    observed_reads: Sequence[Mapping[str, Any]],
+    start_field: str,
+    end_field: str,
+    line_range: bool,
+) -> str | None:
+    for item in observed_reads:
+        if (
+            str(item.get("path")) != path
+            or int(item.get(start_field, -1)) > start
+            or int(item.get(end_field, -1)) < end
+        ):
+            continue
+        content = str(item.get("content") or "")
+        observed_start = int(item[start_field])
+        if line_range:
+            lines = content.splitlines()
+            relative_start = start - observed_start
+            relative_end = end - observed_start + 1
+            return "\n".join(lines[relative_start:relative_end])
+        relative_start = start - observed_start
+        relative_end = end - observed_start
+        return content[relative_start:relative_end]
+    return None
+
+
+def _validate_quote(quote: Any, excerpt: str | None, field: str) -> str:
+    text = _text(quote, f"{field}.quote", maximum=500)
+    if excerpt is None:
+        raise DiagnosisValidationError(f"{field} cites content not read by the agent")
+    if text not in excerpt:
+        raise DiagnosisValidationError(
+            f"{field}.quote is not present inside the cited range"
+        )
+    return text
+
+
 def _validate_source_range(
     value: Mapping[str, Any],
     *,
     bundle: Mapping[str, Any],
     observed_source_reads: Sequence[Mapping[str, Any]] | None,
     field: str,
+    require_quote: bool = False,
 ) -> None:
     path = _text(value.get("path"), f"{field}.path", maximum=300)
     manifest = _manifest(bundle, "source")
@@ -147,6 +189,25 @@ def _validate_source_range(
         end_field="end_line",
     ):
         raise DiagnosisValidationError(f"{field} cites source lines not read by the agent")
+    quote = (
+        _text(value.get("quote"), f"{field}.quote", maximum=500)
+        if require_quote
+        else None
+    )
+    if require_quote and observed_source_reads is not None:
+        _validate_quote(
+            quote,
+            _observed_excerpt(
+                path=path,
+                start=start,
+                end=end,
+                observed_reads=observed_source_reads,
+                start_field="start_line",
+                end_field="end_line",
+                line_range=True,
+            ),
+            field,
+        )
 
 
 def _resolve_field(root: Mapping[str, Any], dotted: str) -> Any:
@@ -200,8 +261,8 @@ def _validate_anchor(
         "trajectory": {"kind", "claim", "turn", "tool_call_id"},
         "coverage": {"kind", "claim", "evidence_index", "layer"},
         "evaluation": {"kind", "claim", "field"},
-        "source": {"kind", "claim", "path", "start_line", "end_line"},
-        "payload": {"kind", "claim", "path", "offset_chars", "end_chars"},
+        "source": {"kind", "claim", "quote", "path", "start_line", "end_line"},
+        "payload": {"kind", "claim", "quote", "path", "offset_chars", "end_chars"},
     }
     if kind not in allowed:
         raise DiagnosisValidationError(f"{field}.kind is unsupported: {kind!r}")
@@ -238,9 +299,11 @@ def _validate_anchor(
             bundle=bundle,
             observed_source_reads=observed_source_reads,
             field=field,
+            require_quote=True,
         )
     else:
         path = _text(anchor.get("path"), f"{field}.path", maximum=300)
+        quote = _text(anchor.get("quote"), f"{field}.quote", maximum=500)
         manifest = _manifest(bundle, "payload")
         if path not in manifest:
             raise DiagnosisValidationError(f"{field} references unknown payload {path!r}")
@@ -260,6 +323,20 @@ def _validate_anchor(
             end_field="end_chars",
         ):
             raise DiagnosisValidationError(f"{field} cites payload content not read by the agent")
+        if observed_payload_reads is not None:
+            _validate_quote(
+                quote,
+                _observed_excerpt(
+                    path=path,
+                    start=start,
+                    end=end,
+                    observed_reads=observed_payload_reads,
+                    start_field="offset_chars",
+                    end_field="end_chars",
+                    line_range=False,
+                ),
+                field,
+            )
     return anchor
 
 

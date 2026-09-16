@@ -139,6 +139,7 @@ class DiagnosisAgentTest(unittest.TestCase):
                 {
                     "kind": "source",
                     "claim": "The agent loop controls final-answer acceptance.",
+                    "quote": "def run_agent(",
                     "path": "systems/deepread/DeepRead/agent/runner.py",
                     "start_line": 1,
                     "end_line": 30,
@@ -250,6 +251,28 @@ class DiagnosisAgentTest(unittest.TestCase):
                 self._diagnosis(),
                 bundle=bundle,
                 observed_source_reads=[],
+                observed_payload_reads=[],
+            )
+
+    def test_validator_rejects_quote_outside_cited_source_range(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = json.loads(self._bundle(root).read_text())
+        diagnosis = self._diagnosis()
+        diagnosis["supporting_evidence"][1]["end_line"] = 5
+        source_path = self.source_root / "systems/deepread/DeepRead/agent/runner.py"
+        observed = {
+            "path": "systems/deepread/DeepRead/agent/runner.py",
+            "start_line": 1,
+            "end_line": 30,
+            "content": "\n".join(source_path.read_text().splitlines()[:30]),
+        }
+
+        with self.assertRaisesRegex(DiagnosisValidationError, "not present"):
+            validate_diagnosis(
+                diagnosis,
+                bundle=bundle,
+                observed_source_reads=[observed],
                 observed_payload_reads=[],
             )
 
@@ -368,6 +391,9 @@ class DiagnosisAgentTest(unittest.TestCase):
             diagnosis = self._diagnosis()
             diagnosis["supporting_evidence"][1]["path"] = (
                 "systems/deepread/DeepRead/index/markdown_parser.py"
+            )
+            diagnosis["supporting_evidence"][1]["quote"] = (
+                "def _read_file(path: str) -> str:"
             )
             diagnosis["supporting_evidence"][1]["end_line"] = 240
             diagnosis["affected_sources"][0]["path"] = (

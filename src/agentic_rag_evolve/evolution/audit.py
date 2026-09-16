@@ -135,6 +135,7 @@ def audit_candidate(
         "schema_version": "deepread-candidate-audit-v1",
         "candidate_id": manifest.get("candidate_id"),
         "plan_id": manifest.get("plan_id"),
+        "plan_sha256": manifest.get("plan_sha256"),
         "base_commit": manifest.get("base_commit"),
         "head_commit": head,
         "passed": not violations,

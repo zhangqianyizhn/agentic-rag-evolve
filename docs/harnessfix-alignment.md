@@ -11,6 +11,7 @@
 | `enhancement_implementation/` | `evolution/repair`（计划） | 允许修改 agent、检索、索引与 prompt，范围由每次计划决定。 |
 | `run_pipeline_gaia.py` | `run_pipeline_deepread.py`（后期） | 等各模块稳定后再编写总编排，避免先形成一个特化的大脚本。 |
 | 复制 `enhanced_odr_vN` 目录 | detached Git worktree + 外部 manifest | 保留完整 runner/target 组合和精确 base commit；通过验证后再决定长期分支或 tag。 |
+| validation gate 的 resolved 数量与成本报告 | development/promotion 两级逐题配对门禁 | DeepRead 显式限制平均指标、题级回退、运行异常和 token 成本；promotion 另需跨数据集 cohort。 |
 
 共同主线保持一致：冻结被测系统 → 运行 → 评测 → 诊断 → 聚合计划 → 隔离修改 → train/development 验证 → 晋升或拒绝。
 

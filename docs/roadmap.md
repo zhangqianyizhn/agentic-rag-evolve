@@ -77,16 +77,16 @@
 - [x] 声明目标 cohort、潜在副作用、允许修改范围和验证计划；
 - [x] 实现 detached worktree candidate 隔离与 manifest 冻结（真实 candidate 等待 recurring `proceed` plan）；
 - [x] 独立执行 diff/范围/静态审计；
-- 独立执行 candidate 测试审计与行为验证。
+- 独立执行 candidate 固定测试审计；
+- [x] 实现与静态审计及冻结 plan 绑定的行为验证协议。
 
 ## M6：验证门禁与外层循环
 
 对应 HarnessFix 的 train compare、validation gate 和 harness memory。
 
-- development bad case 快速反馈；
-- 同数据集未参与诊断样本验证；
-- 多数据集回归与成本门禁；
+- [x] development bad case 与同数据集 holdout 的逐题配对门禁（协议与合成测试）；
+- [x] promotion 级跨数据集回归与 token 成本门禁（协议与合成测试）；
 - 保存被接受和被拒绝候选；
-- 最终 test 保持隔离。
+- [x] 在验证协议中拒绝 final test role，使其不参与 candidate 选择。
 
 完成条件：可以从 v0 自动完成一轮诊断、修改和候选晋升，并完整复现实验谱系。

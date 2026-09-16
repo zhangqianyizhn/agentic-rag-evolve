@@ -77,7 +77,7 @@ deterministic metrics + optional LLM judge
 - 最终缺陷 taxonomy；
 - 修复 operator registry；
 - 诊断使用单 agent 还是多 agent；
-- candidate 使用目录复制、Git worktree 还是其他隔离方式；
+- candidate 晋升后采用分支、tag 还是其他长期保存方式（生成阶段已采用 detached Git worktree，见 ADR 0002）；
 - 多数据集调度和长期记忆存储实现；
 - 哪些 telemetry 必须侵入 DeepRead runtime。
 

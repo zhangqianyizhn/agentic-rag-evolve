@@ -10,7 +10,7 @@
 | `failure_analysis/` | `diagnostics/` + `diagnosis/` | 确定性 evidence/failure signals 负责分流，诊断 agent 使用开放式假设与强引用校验；不复用 GAIA 的固定失败类别、fix scope 和 HTIR。 |
 | `enhancement_implementation/` | `evolution/repair`（计划） | 允许修改 agent、检索、索引与 prompt，范围由每次计划决定。 |
 | `run_pipeline_gaia.py` | `run_pipeline_deepread.py`（后期） | 等各模块稳定后再编写总编排，避免先形成一个特化的大脚本。 |
-| 复制 `enhanced_odr_vN` 目录 | candidate 隔离方式待定 | 在实际修改模块前比较 copy、branch 与 worktree。 |
+| 复制 `enhanced_odr_vN` 目录 | detached Git worktree + 外部 manifest | 保留完整 runner/target 组合和精确 base commit；通过验证后再决定长期分支或 tag。 |
 
 共同主线保持一致：冻结被测系统 → 运行 → 评测 → 诊断 → 聚合计划 → 隔离修改 → train/development 验证 → 晋升或拒绝。
 

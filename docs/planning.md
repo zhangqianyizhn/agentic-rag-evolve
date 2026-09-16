@@ -67,3 +67,18 @@ python runner/run_modification_planning.py \
   --output <modification-plan.json> \
   --env-file .env
 ```
+
+## Candidate isolation and static audit
+
+通过 plan gate 后，`runner/create_candidate.py` 从明确的 base commit 创建 detached Git worktree。manifest 位于 worktree 外部，冻结 plan hash、base commit、allowed paths 和文件预算；不自动创建分支或清理目录。选择依据见 `docs/decisions/0002-candidate-isolation.md`。
+
+`runner/audit_candidate.py` 是只读审计，检查：
+
+- candidate HEAD 仍等于 base commit；
+- 当前 plan 文件与 manifest hash 一致；
+- tracked/untracked changed paths 均在 allowed paths 内且不超过预算；
+- forbidden roots 未被触碰；
+- 不存在新增/修改 symlink；
+- changed Python 文件可编译，且 `git diff --check` 通过。
+
+本阶段只实现隔离和静态审计，不会在没有 recurring `proceed` plan 时创建真实 candidate。行为评测、development/holdout 运行和晋升/回滚属于 M6 validation gate。

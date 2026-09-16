@@ -245,6 +245,11 @@ def evaluate_validation_gate(
         raise ValueError("candidate static audit must pass before behavior validation")
     if not test_audit.get("passed"):
         raise ValueError("candidate fixed tests must pass before behavior validation")
+    candidate_audit_sha256 = hashlib.sha256(
+        Path(candidate_audit_path).read_bytes()
+    ).hexdigest()
+    if test_audit.get("candidate_audit_sha256") != candidate_audit_sha256:
+        raise ValueError("candidate test audit is not bound to the static audit")
     if suite.get("candidate_id") != audit.get("candidate_id"):
         raise ValueError("validation suite candidate_id does not match audit")
     if suite.get("plan_id") != audit.get("plan_id"):
@@ -315,6 +320,12 @@ def evaluate_validation_gate(
         "candidate_snapshot_sha256": audit.get("candidate_snapshot_sha256"),
         "test_policy_id": test_audit.get("test_policy_id"),
         "test_policy_sha256": test_audit.get("test_policy_sha256"),
+        "plan_sha256": hashlib.sha256(plan_bytes).hexdigest(),
+        "validation_suite_sha256": hashlib.sha256(suite_path.read_bytes()).hexdigest(),
+        "candidate_audit_sha256": candidate_audit_sha256,
+        "candidate_test_audit_sha256": hashlib.sha256(
+            Path(candidate_test_audit_path).read_bytes()
+        ).hexdigest(),
         "passed": not failures,
         "failed_cohorts": failures,
         "cohorts": cohorts,

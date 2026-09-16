@@ -33,4 +33,4 @@ HarnessFix 的 validation gate 主要以 resolved 数量决定是否通过，并
 
 ## 当前边界
 
-目前已用合成评测产物验证协议、错误拒绝路径和 promotion 成功路径。仓库中尚无满足 recurring hypothesis 与 `proceed` plan 的真实修复 candidate，因此没有伪造一次真实晋升结果。accepted/rejected 持久化和外层循环仍属于后续实现。
+目前已用合成评测产物验证协议、错误拒绝路径、promotion 成功路径和 accepted/rejected outcome registry。仓库中尚无满足 recurring hypothesis 与 `proceed` plan 的真实修复 candidate，因此没有伪造一次真实晋升结果。accepted candidate 的 Git materialization 与外层循环仍属于后续实现。

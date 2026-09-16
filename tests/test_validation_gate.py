@@ -95,10 +95,12 @@ class ValidationGateTest(unittest.TestCase):
             encoding="utf-8",
         )
         test_audit_path = root / "candidate-test-audit.json"
+        audit_sha256 = hashlib.sha256(audit_path.read_bytes()).hexdigest()
         test_audit_path.write_text(
             json.dumps(
                 {
                     "schema_version": "deepread-candidate-test-audit-v1",
+                    "candidate_audit_sha256": audit_sha256,
                     "candidate_id": "candidate-1",
                     "plan_id": "plan-1",
                     "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
@@ -298,6 +300,17 @@ class ValidationGateTest(unittest.TestCase):
             paths[3].write_text(json.dumps(test_audit))
 
             with self.assertRaisesRegex(ValueError, "fixed tests must pass"):
+                self._evaluate(paths)
+
+    def test_fixed_test_audit_must_bind_exact_static_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root)
+            test_audit = json.loads(paths[3].read_text())
+            test_audit["candidate_audit_sha256"] = "f" * 64
+            paths[3].write_text(json.dumps(test_audit))
+
+            with self.assertRaisesRegex(ValueError, "not bound"):
                 self._evaluate(paths)
 
     def test_fixed_test_snapshot_must_match_static_audit(self) -> None:

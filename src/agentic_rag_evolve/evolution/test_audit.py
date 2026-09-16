@@ -94,6 +94,7 @@ def audit_candidate_tests(
 ) -> dict[str, Any]:
     """Execute trusted test kinds and preserve a compact, reproducible audit."""
 
+    candidate_audit_path = Path(candidate_audit_path)
     audit = _object(candidate_audit_path, "candidate audit")
     policy_bytes = Path(policy_path).read_bytes()
     policy = json.loads(policy_bytes)
@@ -241,6 +242,9 @@ def audit_candidate_tests(
     )
     return {
         "schema_version": "deepread-candidate-test-audit-v1",
+        "candidate_audit_sha256": hashlib.sha256(
+            candidate_audit_path.read_bytes()
+        ).hexdigest(),
         "candidate_id": audit.get("candidate_id"),
         "plan_id": audit.get("plan_id"),
         "plan_sha256": audit.get("plan_sha256"),

@@ -106,6 +106,7 @@ def audit_candidate(
     plan_path: Path,
     command_runner: CommandRunner = _run,
 ) -> dict[str, Any]:
+    manifest_path = Path(manifest_path)
     manifest, _, plan = _load_inputs(manifest_path, plan_path)
     candidate_path = Path(str(manifest["candidate_path"])).resolve()
     head = command_runner(
@@ -165,6 +166,9 @@ def audit_candidate(
         violations.append("git_diff_check_failed")
     return {
         "schema_version": "deepread-candidate-audit-v1",
+        "candidate_manifest_sha256": hashlib.sha256(
+            manifest_path.read_bytes()
+        ).hexdigest(),
         "candidate_id": manifest.get("candidate_id"),
         "plan_id": manifest.get("plan_id"),
         "plan_sha256": manifest.get("plan_sha256"),

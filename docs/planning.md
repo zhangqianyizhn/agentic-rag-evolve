@@ -44,3 +44,26 @@ python runner/run_hypothesis_aggregation.py \
   --output <improvement-hypotheses.json> \
   --env-file .env
 ```
+
+## Bounded modification plan
+
+`runner/run_modification_planning.py` 将 hypothesis 转换为修改契约，但不创建 candidate、不读取未引用源码，也不执行编辑。与 HarnessFix 从 operator registry 推导 allowed paths 不同，DeepRead plan 只能选择 hypothesis 的 `affected_source_refs`；validator 再从原 diagnosis cohort 解析真实 path 与 symbol，模型不能直接提供文件路径。
+
+主要门禁：
+
+- `singleton` hypothesis 必须 `defer`，不能自动进入修改；
+- `proceed` 必须覆盖 hypothesis 的全部 development task；
+- allowed source 不得超出 hypothesis 已引用范围；
+- 必须声明 preserved behavior、non-goals、holdout selection、expected observations、rollback conditions 与 regression scenarios；
+- framework、runner、provider、benchmark、tests、docs 和 `.env` 固定为 forbidden roots；
+- 输出自动计算 `max_files_to_modify`，并要求 modify agent 编辑前先检查全部 allowed sources。
+
+无 hypothesis 时确定性输出 `no_plannable_hypotheses`，模型调用和 token 均为零。真实调用同样产生独立 audit 与失败 candidate。
+
+```bash
+python runner/run_modification_planning.py \
+  --cohort <hypothesis-cohort.json> \
+  --hypotheses <improvement-hypotheses.json> \
+  --output <modification-plan.json> \
+  --env-file .env
+```

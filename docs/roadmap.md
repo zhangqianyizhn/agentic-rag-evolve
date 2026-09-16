@@ -74,7 +74,7 @@
 
 - [x] 建立 repair-eligible diagnosis cohort，并隔离 evaluation/data review 与证据不足样本；
 - [x] 将相似诊断归并为可证伪的 improvement hypothesis（协议、validator 与空 cohort 已验证；真实 recurring cohort 待合格诊断样本齐备）；
-- 声明目标 cohort、潜在副作用、允许修改范围和验证计划；
+- [x] 声明目标 cohort、潜在副作用、允许修改范围和验证计划；
 - 隔离产生 DeepRead candidate；
 - 独立执行 diff/范围/测试审计。
 

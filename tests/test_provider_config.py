@@ -72,6 +72,41 @@ class ProviderConfigTest(unittest.TestCase):
             ):
                 model.complete({"messages": []})
 
+    def test_retryable_response_honors_retry_after_and_records_attempts(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "LLM_MODEL": "judge-v1",
+                "LLM_BASE_URL": "https://example.invalid/v1",
+                "LLM_API_KEY": "test-only",
+            },
+            clear=True,
+        ):
+            model = load_chat_model(
+                max_retries=1,
+                retry_base_seconds=15,
+                retry_max_seconds=120,
+            )
+        limited = Mock(status_code=429)
+        limited.headers = {"Retry-After": "7"}
+        success = Mock(status_code=200)
+        success.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {},
+        }
+
+        with patch(
+            "agentic_rag_evolve.providers.http.requests.post",
+            side_effect=[limited, success],
+        ) as post, patch("agentic_rag_evolve.providers.http.time.sleep") as sleep:
+            result = model.complete({"messages": []})
+
+        self.assertEqual(result["choices"][0]["message"]["content"], "ok")
+        self.assertEqual(post.call_count, 2)
+        sleep.assert_called_once_with(7.0)
+        self.assertEqual(model.last_attempts, 2)
+        self.assertEqual(model.last_retry_delays, [7.0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -88,6 +88,8 @@ def load_chat_model(
     *,
     timeout: int = 120,
     max_retries: int = 5,
+    retry_base_seconds: float = 1.5,
+    retry_max_seconds: float = 90.0,
 ) -> OpenAICompatibleChatModel:
     if env_file is not None:
         load_dotenv(Path(env_file), override=False)
@@ -97,6 +99,8 @@ def load_chat_model(
         api_key=_required("LLM_API_KEY"),
         timeout=timeout,
         max_retries=max_retries,
+        retry_base_seconds=retry_base_seconds,
+        retry_max_seconds=retry_max_seconds,
     )
 
 

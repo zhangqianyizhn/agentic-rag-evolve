@@ -52,7 +52,11 @@ class OpenAICompatibleChatModel:
     base_url: str = "https://api.openai.com/v1"
     timeout: int = 120
     max_retries: int = 5
+    retry_base_seconds: float = 1.5
+    retry_max_seconds: float = 90.0
     default_headers: Mapping[str, str] = field(default_factory=dict)
+    last_attempts: int = field(init=False, default=0)
+    last_retry_delays: list[float] = field(init=False, default_factory=list)
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -64,6 +68,21 @@ class OpenAICompatibleChatModel:
             raise ValueError("chat timeout must be positive")
         if self.max_retries < 0:
             raise ValueError("chat max_retries must be non-negative")
+        if self.retry_base_seconds < 0 or self.retry_max_seconds < 0:
+            raise ValueError("chat retry delays must be non-negative")
+
+    def _retry_delay(self, response: requests.Response | None, attempt: int) -> float:
+        if response is not None:
+            raw_retry_after = response.headers.get("Retry-After")
+            if raw_retry_after:
+                try:
+                    return min(self.retry_max_seconds, max(0.0, float(raw_retry_after)))
+                except ValueError:
+                    pass
+        return min(
+            self.retry_max_seconds,
+            self.retry_base_seconds * (2 ** (attempt - 1)),
+        )
 
     def complete(
         self,
@@ -80,9 +99,10 @@ class OpenAICompatibleChatModel:
         }
 
         max_attempts = 1 + self.max_retries
+        self.last_attempts = 0
+        self.last_retry_delays = []
         for attempt in range(1, max_attempts + 1):
-            if attempt > 1:
-                time.sleep(min(90, 1.5 * (2 ** (attempt - 2))))
+            self.last_attempts = attempt
             emit_trace(
                 "llm_http_attempt",
                 attempt=attempt,
@@ -98,13 +118,17 @@ class OpenAICompatibleChatModel:
                 status = response.status_code
                 retryable = status in {429, 500, 502, 503, 504}
                 if retryable and attempt < max_attempts:
+                    delay = self._retry_delay(response, attempt)
+                    self.last_retry_delays.append(delay)
                     emit_trace(
                         "llm_http_error",
                         status_code=status,
                         error=f"HTTP {status}",
                         attempt=attempt,
                         will_retry=True,
+                        retry_delay_seconds=delay,
                     )
+                    time.sleep(delay)
                     continue
                 if status >= 400:
                     raise requests.HTTPError(
@@ -124,14 +148,24 @@ class OpenAICompatibleChatModel:
                 return result
             except requests.RequestException as exc:
                 will_retry = attempt < max_attempts
+                delay = self._retry_delay(
+                    getattr(exc, "response", None), attempt
+                ) if will_retry else None
                 emit_trace(
                     "llm_http_error",
                     error=str(exc),
                     attempt=attempt,
                     will_retry=will_retry,
+                    **(
+                        {"retry_delay_seconds": delay}
+                        if delay is not None
+                        else {}
+                    ),
                 )
                 if not will_retry:
                     raise
+                self.last_retry_delays.append(delay or 0.0)
+                time.sleep(delay or 0.0)
 
         raise RuntimeError("chat completion exhausted retries")
 

@@ -347,6 +347,10 @@ def run_diagnosis(
                 time.monotonic() - request_started, 3
             )
             model_event["error"] = f"{type(exc).__name__}: {exc}"
+            model_event["provider_attempts"] = getattr(model, "last_attempts", 1)
+            model_event["retry_delays_seconds"] = list(
+                getattr(model, "last_retry_delays", [])
+            )
             audit["status"] = "error"
             audit["error"] = f"{type(exc).__name__}: {exc}"
             _write_json(audit_path, audit)
@@ -397,6 +401,10 @@ def run_diagnosis(
                     "output_tokens": output_tokens,
                     "reasoning_tokens": reasoning_tokens,
                 },
+                "provider_attempts": getattr(model, "last_attempts", 1),
+                "retry_delays_seconds": list(
+                    getattr(model, "last_retry_delays", [])
+                ),
             }
         )
         _write_json(audit_path, audit)

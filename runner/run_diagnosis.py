@@ -21,7 +21,9 @@ def main() -> int:
     parser.add_argument("--max-tool-calls", type=int)
     parser.add_argument("--max-output-tokens", type=int)
     parser.add_argument("--request-timeout", type=int, default=1800)
-    parser.add_argument("--request-max-retries", type=int, default=0)
+    parser.add_argument("--request-max-retries", type=int, default=3)
+    parser.add_argument("--request-retry-base-seconds", type=float, default=15.0)
+    parser.add_argument("--request-retry-max-seconds", type=float, default=120.0)
     args = parser.parse_args()
     report = run_diagnosis(
         bundle_path=args.bundle,
@@ -31,6 +33,8 @@ def main() -> int:
             args.env_file,
             timeout=args.request_timeout,
             max_retries=args.request_max_retries,
+            retry_base_seconds=args.request_retry_base_seconds,
+            retry_max_seconds=args.request_retry_max_seconds,
         ),
         max_rounds=args.max_rounds,
         max_tool_calls=args.max_tool_calls,

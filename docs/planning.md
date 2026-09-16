@@ -22,3 +22,25 @@ python runner/build_hypothesis_cohort.py \
 ```
 
 下一模块只读取 `eligible_diagnoses`，生成包含目标 cohort、共同机制、反证和可证伪验证条件的 improvement hypothesis；源码修改范围和 candidate 创建仍留在更后面的 planning/modify 阶段。
+
+## Improvement hypothesis aggregation
+
+`runner/run_hypothesis_aggregation.py` 不使用固定 defect class、harness layer 或 repair operator。模型只能通过 task ID 和数组 index 引用 cohort 中已有的 supporting/contradicting evidence 与 affected source，validator 会拒绝未知任务、越界证据、虚构源码范围、重复分组和遗漏任务。
+
+每个 hypothesis 明确记录：
+
+- 共同机制与最早干预模式；
+- inclusion/exclusion signals，用于界定目标 cohort；
+- 概念级 behavior delta，而非补丁或实现步骤；
+- 支持证据、反证和源码引用；
+- expected observation、falsifier 与 regression guards；
+- `singleton` 或 `recurring` 成熟度。
+
+没有 eligible diagnosis 时直接生成 `no_eligible_diagnoses`，不调用模型。真实调用产生独立 `*.audit.json`，记录耗时、token、provider retry 和校验错误但不复制长 prompt；可解析但无效的候选保留为 `*.candidate.json`。
+
+```bash
+python runner/run_hypothesis_aggregation.py \
+  --cohort <hypothesis-cohort.json> \
+  --output <improvement-hypotheses.json> \
+  --env-file .env
+```

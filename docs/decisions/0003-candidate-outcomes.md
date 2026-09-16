@@ -8,7 +8,7 @@ Accepted。
 
 只有 promotion 级 validation gate 可以产生 candidate 终态。门禁通过写入 `accepted/`，门禁失败写入 `rejected/`；development gate 只是中间反馈，不能产生终态。
 
-accepted 的含义是 `eligible_for_materialization`，而不是已经成为新 baseline。记录过程不提交代码、不创建分支、不移动 worktree，也不修改 baseline 指针。后续 materialization 步骤必须再次核对 candidate snapshot，才能形成可作为下一轮起点的 Git commit。
+accepted 的含义是 `eligible_for_materialization`，而不是已经成为新 baseline。记录过程不提交代码、不创建分支、不移动 worktree，也不修改 baseline 指针。独立 materialization 步骤再次核对 candidate snapshot，并形成 detached Git commit；该步骤仍不会更新 baseline。
 
 终态唯一键是 `(candidate_id, candidate_snapshot_sha256)`。这是因为 candidate ID 在编辑前生成，同一 plan/base 的不同修订可能共享 ID；同一源码快照则不能同时拥有两个终态。
 

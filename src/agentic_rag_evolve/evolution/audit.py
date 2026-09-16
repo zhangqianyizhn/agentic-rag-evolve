@@ -152,6 +152,8 @@ def audit_candidate(
     violations = []
     if head != manifest.get("base_commit"):
         violations.append("candidate_head_changed")
+    if not changed_paths:
+        violations.append("no_candidate_changes")
     if len(changed_paths) > max_files:
         violations.append("changed_files_exceed_budget")
     if out_of_scope:

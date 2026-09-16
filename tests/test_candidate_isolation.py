@@ -206,6 +206,24 @@ class CandidateIsolationTest(unittest.TestCase):
 
         self.assertIn("changed_symlinks", result["violations"])
 
+    def test_audit_rejects_candidate_without_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, plan_path, manifest_path = self._audit_fixture(root)
+
+            def runner(command):
+                stdout = BASE_COMMIT + "\n" if "rev-parse" in command else ""
+                return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+            result = audit_candidate(
+                manifest_path=manifest_path,
+                plan_path=plan_path,
+                command_runner=runner,
+            )
+
+        self.assertFalse(result["passed"])
+        self.assertIn("no_candidate_changes", result["violations"])
+
 
 if __name__ == "__main__":
     unittest.main()

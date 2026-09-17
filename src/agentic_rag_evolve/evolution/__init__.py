@@ -5,6 +5,11 @@ from .candidates import create_candidate_worktree
 from .test_audit import audit_candidate_tests
 from .registry import record_candidate_outcome
 from .materialize import materialize_accepted_candidate
+from .baselines import (
+    advance_baseline_registry,
+    current_baseline,
+    initialize_baseline_registry,
+)
 
 __all__ = [
     "audit_candidate",
@@ -14,4 +19,7 @@ __all__ = [
     "audit_candidate_tests",
     "record_candidate_outcome",
     "materialize_accepted_candidate",
+    "advance_baseline_registry",
+    "current_baseline",
+    "initialize_baseline_registry",
 ]

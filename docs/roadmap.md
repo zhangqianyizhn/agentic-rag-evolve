@@ -88,7 +88,8 @@
 - [x] promotion 级跨数据集回归与 token 成本门禁（协议与合成测试）；
 - [x] 以不可变 outcome record 保存 accepted/rejected candidate revision；
 - [x] 将 accepted revision 物化为确定性的 detached Git commit；
-- 建立显式 baseline registry，并由 materialized commit 推进下一轮；
+- [x] 建立线性不可变 baseline registry，并用 durable Git ref 保存 materialized commit；
+- 编排单轮外层循环，并将 rejected outcome 转为下一轮约束；
 - [x] 在验证协议中拒绝 final test role，使其不参与 candidate 选择。
 
 完成条件：可以从 v0 自动完成一轮诊断、修改和候选晋升，并完整复现实验谱系。

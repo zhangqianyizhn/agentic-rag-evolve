@@ -8,6 +8,7 @@ from pathlib import Path
 from agentic_rag_evolve.planning import (
     ModificationPlanValidationError,
     build_planning_memory_context,
+    build_preservation_memory,
     build_repair_memory,
     validate_modification_plan,
     validate_planning_memory_context,
@@ -57,6 +58,16 @@ def _outcome(root: Path, *, outcome: str = "rejected") -> Path:
         "candidate_snapshot_sha256": "a" * 64,
         "cohort_summary": [
             {
+                "name": "financebench-development",
+                "dataset": "financebench",
+                "role": "development",
+                "passed": False,
+                "mean_delta": -0.1,
+                "regressed_task_ids": ["q1"],
+                "token_cost_ratio": 1.2,
+                "failure_reasons": ["mean_delta"],
+            },
+            {
                 "name": "financebench-holdout",
                 "dataset": "financebench",
                 "role": "holdout",
@@ -72,6 +83,107 @@ def _outcome(root: Path, *, outcome: str = "rejected") -> Path:
         },
     }
     return _write(root / "outcome.json", value)
+
+
+def _accepted_lineage(root: Path) -> tuple[Path, Path, Path]:
+    plan_path = _write(root / "accepted-plan.json", _plan())
+    gate_path = _write(
+        root / "accepted-gate.json",
+        {
+            "schema_version": "deepread-validation-gate-v1",
+            "passed": True,
+            "cohorts": [
+                {
+                    "name": "financebench-development",
+                    "dataset": "financebench",
+                    "role": "development",
+                    "passed": True,
+                    "mean_delta": 0.2,
+                    "improved_task_ids": ["q1"],
+                    "regressed_task_ids": [],
+                    "token_cost_ratio": 1.1,
+                },
+                {
+                    "name": "other-cross",
+                    "dataset": "other",
+                    "role": "cross_dataset",
+                    "passed": True,
+                    "mean_delta": 0.0,
+                    "improved_task_ids": ["secret-cross-task"],
+                    "regressed_task_ids": [],
+                    "token_cost_ratio": 1.0,
+                },
+            ],
+        },
+    )
+    outcome_path = _write(
+        root / "accepted-outcome.json",
+        {
+            "schema_version": "deepread-candidate-outcome-v1",
+            "decision_id": "outcome-accepted",
+            "candidate_id": "candidate-accepted",
+            "plan_id": "plan-old",
+            "outcome": "accepted",
+            "promotion_status": "eligible_for_materialization",
+            "artifacts": {
+                "modification_plan": {
+                    "path": str(plan_path),
+                    "sha256": _sha(plan_path),
+                },
+                "validation_gate": {
+                    "path": str(gate_path),
+                    "sha256": _sha(gate_path),
+                },
+            },
+        },
+    )
+    materialization_id = "materialization-" + hashlib.sha256(
+        json.dumps(
+            {
+                "decision_id": "outcome-accepted",
+                "outcome_record_sha256": _sha(outcome_path),
+                "materialized_commit": "b" * 40,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()[:20]
+    materialization_path = _write(
+        root / "materialization.json",
+        {
+            "schema_version": "deepread-candidate-materialization-v1",
+            "materialization_id": materialization_id,
+            "decision_id": "outcome-accepted",
+            "outcome_record": str(outcome_path),
+            "outcome_record_sha256": _sha(outcome_path),
+            "materialized_commit": "b" * 40,
+            "status": "materialized_detached",
+        },
+    )
+    baseline = {
+        "schema_version": "deepread-baseline-entry-v1",
+        "generation": 1,
+        "commit": "b" * 40,
+        "tree": "c" * 40,
+        "parent_baseline_id": "baseline-0000-parent",
+        "parent_commit": "a" * 40,
+        "materialization_id": materialization_id,
+        "materialization_path": str(materialization_path),
+        "materialization_sha256": _sha(materialization_path),
+        "source_repo": str(root / "candidate"),
+        "status": "registered",
+    }
+    basis = {key: value for key, value in baseline.items() if key != "schema_version"}
+    basis_sha = hashlib.sha256(
+        json.dumps(basis, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    baseline["entry_basis_sha256"] = basis_sha
+    baseline["baseline_id"] = f"baseline-0001-{basis_sha[:16]}"
+    baseline["durable_ref"] = (
+        f"refs/agentic-rag-evolve/baselines/{baseline['baseline_id']}"
+    )
+    baseline_path = _write(root / "baseline.json", baseline)
+    return outcome_path, materialization_path, baseline_path
 
 
 def _cohort() -> dict:
@@ -175,8 +287,14 @@ class RepairMemoryTest(unittest.TestCase):
                 outcome_path=_outcome(root), memory_root=root / "memory"
             )
 
-        self.assertEqual(memory["schema_version"], "deepread-repair-memory-v1")
-        self.assertEqual(memory["constraints"]["protect_task_ids"], ["q9"])
+        self.assertEqual(memory["schema_version"], "deepread-repair-memory-v2")
+        self.assertEqual(memory["constraints"]["protect_task_ids"], ["q1"])
+        self.assertEqual(memory["constraints"]["sealed_regression_count"], 1)
+        holdout = next(
+            item for item in memory["observed_failures"] if item["role"] == "holdout"
+        )
+        self.assertEqual(holdout["regressed_task_ids"], [])
+        self.assertEqual(holdout["task_id_visibility"], "sealed")
         self.assertEqual(len(memory["attempt"]["fingerprint"]), 64)
         self.assertTrue(path.name.startswith("memory-"))
         self.assertNotIn("trace", memory)
@@ -286,6 +404,66 @@ class RepairMemoryTest(unittest.TestCase):
                     hypotheses=_hypotheses(),
                     cohort_sha256=_sha(cohort_path),
                     hypotheses_sha256=_sha(hypotheses_path),
+                )
+
+    def test_builds_accepted_preservation_memory_without_task_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outcome, materialization, baseline = _accepted_lineage(root)
+            memory, path = build_preservation_memory(
+                outcome_path=outcome,
+                materialization_path=materialization,
+                baseline_entry_path=baseline,
+                memory_root=root / "memory",
+            )
+
+        self.assertEqual(
+            memory["schema_version"], "deepread-preservation-memory-v1"
+        )
+        self.assertEqual(memory["baseline_commit"], "b" * 40)
+        self.assertTrue(all(not item["task_ids_exposed"] for item in memory["validated_gains"]))
+        self.assertNotIn("secret-cross-task", json.dumps(memory))
+        self.assertEqual(path.parent.name, "accepted")
+
+    def test_planning_context_includes_matching_preservation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outcome, materialization, baseline = _accepted_lineage(root)
+            preservation, _ = build_preservation_memory(
+                outcome_path=outcome,
+                materialization_path=materialization,
+                baseline_entry_path=baseline,
+                memory_root=root / "memory",
+            )
+            cohort_path = _write(root / "cohort.json", _cohort())
+            hypotheses_path = _write(root / "hypotheses.json", _hypotheses())
+            context = build_planning_memory_context(
+                memory_root=root / "memory",
+                cohort_path=cohort_path,
+                hypotheses_path=hypotheses_path,
+                output_path=root / "context.json",
+            )
+
+        successes = context["entries"][0]["relevant_successes"]
+        self.assertEqual(
+            [item["preservation_id"] for item in successes],
+            [preservation["preservation_id"]],
+        )
+        self.assertNotIn("secret-cross-task", json.dumps(context))
+
+    def test_preservation_memory_rejects_unregistered_materialization(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outcome, materialization, baseline_path = _accepted_lineage(root)
+            baseline = json.loads(baseline_path.read_text())
+            baseline["commit"] = "c" * 40
+            baseline_path.write_text(json.dumps(baseline))
+            with self.assertRaisesRegex(ValueError, "identity is invalid"):
+                build_preservation_memory(
+                    outcome_path=outcome,
+                    materialization_path=materialization,
+                    baseline_entry_path=baseline_path,
+                    memory_root=root / "memory",
                 )
 
 

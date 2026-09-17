@@ -12,7 +12,7 @@
 | `run_pipeline_gaia.py` | `run_pipeline_deepread.py`（后期） | 等各模块稳定后再编写总编排，避免先形成一个特化的大脚本。 |
 | 复制 `enhanced_odr_vN` 目录 | detached Git worktree + 外部 manifest | 保留完整 runner/target 组合和精确 base commit；通过验证后再决定长期分支或 tag。 |
 | validation gate 的 resolved 数量与成本报告 | development/promotion 两级逐题配对门禁 | DeepRead 显式限制平均指标、题级回退、运行异常和 token 成本；promotion 另需跨数据集 cohort。 |
-| promotion 后推进 `current_base_version`、写 harness memory | outcome registry + materialization/baseline registry + repair memory | outcome 本身不改变 Git 或 baseline；accepted revision 经独立固化后才可推进，rejected 只按源码路径交集反馈可复核的失败事实，不沿用固定 defect/operator 分类。 |
+| promotion 后推进 `current_base_version`、写 accepted/rejected harness memory | outcome registry + materialization/baseline registry + repair/preservation memory | outcome 本身不改变 Git 或 baseline；accepted 只有登记为 baseline 后才产生 preservation memory，rejected 只按源码路径交集反馈可复核事实；sealed validation 不泄露题级反馈，也不沿用固定 defect/operator 分类。 |
 | 整数 `current_base_version` + 版本目录 | 线性 baseline entry + internal Git ref | 当前版本由不可变账本末端推导；完整仓库 commit 保留 framework/runner/target 的一致组合。 |
 
 共同主线保持一致：冻结被测系统 → 运行 → 评测 → 诊断 → 聚合计划 → 隔离修改 → train/development 验证 → 晋升或拒绝。

@@ -8,8 +8,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-MEMORY_SCHEMA = "deepread-repair-memory-v1"
-CONTEXT_SCHEMA = "deepread-planning-memory-context-v1"
+MEMORY_SCHEMA = "deepread-repair-memory-v2"
+PRESERVATION_MEMORY_SCHEMA = "deepread-preservation-memory-v1"
+CONTEXT_SCHEMA = "deepread-planning-memory-context-v2"
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -43,14 +44,21 @@ def _failed_cohort_projection(outcome: Mapping[str, Any]) -> list[dict[str, Any]
     for raw in outcome.get("cohort_summary") or []:
         if not isinstance(raw, Mapping) or raw.get("passed"):
             continue
+        role = str(raw.get("role") or "")
+        task_ids = sorted(
+            {str(item) for item in raw.get("regressed_task_ids") or []}
+        )
+        task_feedback_allowed = role == "development"
         failures.append(
             {
                 "name": str(raw.get("name") or ""),
                 "dataset": str(raw.get("dataset") or ""),
-                "role": str(raw.get("role") or ""),
+                "role": role,
                 "mean_delta": raw.get("mean_delta"),
-                "regressed_task_ids": sorted(
-                    {str(item) for item in raw.get("regressed_task_ids") or []}
+                "regressed_task_count": len(task_ids),
+                "regressed_task_ids": task_ids if task_feedback_allowed else [],
+                "task_id_visibility": (
+                    "feedback_allowed" if task_feedback_allowed else "sealed"
                 ),
                 "token_cost_ratio": raw.get("token_cost_ratio"),
                 "failure_reasons": sorted(
@@ -140,6 +148,11 @@ def build_repair_memory(
                     for failure in failures
                     for task_id in failure["regressed_task_ids"]
                 }
+            ),
+            "sealed_regression_count": sum(
+                failure["regressed_task_count"]
+                for failure in failures
+                if failure["task_id_visibility"] == "sealed"
             ),
         },
         "artifacts": {
@@ -231,6 +244,11 @@ def _validate_repair_memory_record(memory: Mapping[str, Any]) -> None:
                 for task_id in failure["regressed_task_ids"]
             }
         ),
+        "sealed_regression_count": sum(
+            failure["regressed_task_count"]
+            for failure in expected_failures
+            if failure["task_id_visibility"] == "sealed"
+        ),
     }
     if memory.get("constraints") != expected_constraints:
         raise ValueError("repair memory constraints are inconsistent")
@@ -241,6 +259,241 @@ def _validate_repair_memory_record(memory: Mapping[str, Any]) -> None:
         != outcome.get("candidate_snapshot_sha256")
     ):
         raise ValueError("repair memory candidate lineage is inconsistent")
+
+
+def _pinned_artifact(
+    owner: Mapping[str, Any], key: str, label: str
+) -> tuple[dict[str, Any], Path, str]:
+    reference = (owner.get("artifacts") or {}).get(key)
+    if not isinstance(reference, Mapping):
+        raise ValueError(f"{label} has no {key} artifact reference")
+    path = Path(str(reference.get("path") or "")).resolve()
+    value, digest = _read_object(path, key.replace("_", " "))
+    if digest != reference.get("sha256"):
+        raise ValueError(f"{key} artifact hash does not match {label} lineage")
+    return value, path, digest
+
+
+def _validate_baseline_entry_identity(baseline: Mapping[str, Any]) -> None:
+    try:
+        generation = int(baseline.get("generation"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("baseline entry has no valid generation") from exc
+    basis = {
+        "generation": generation,
+        "commit": baseline.get("commit"),
+        "tree": baseline.get("tree"),
+        "parent_baseline_id": baseline.get("parent_baseline_id"),
+        "parent_commit": baseline.get("parent_commit"),
+        "materialization_id": baseline.get("materialization_id"),
+        "materialization_path": baseline.get("materialization_path"),
+        "materialization_sha256": baseline.get("materialization_sha256"),
+        "source_repo": baseline.get("source_repo"),
+        "status": baseline.get("status"),
+    }
+    digest = _canonical_sha256(basis)
+    baseline_id = f"baseline-{generation:04d}-{digest[:16]}"
+    if (
+        generation < 1
+        or baseline.get("entry_basis_sha256") != digest
+        or baseline.get("baseline_id") != baseline_id
+        or baseline.get("durable_ref")
+        != f"refs/agentic-rag-evolve/baselines/{baseline_id}"
+    ):
+        raise ValueError("baseline entry identity is invalid")
+
+
+def _derive_preservation_memory(
+    *, outcome_path: Path, materialization_path: Path, baseline_entry_path: Path
+) -> dict[str, Any]:
+    outcome_path = Path(outcome_path).resolve()
+    materialization_path = Path(materialization_path).resolve()
+    baseline_entry_path = Path(baseline_entry_path).resolve()
+    outcome, outcome_sha = _read_object(outcome_path, "candidate outcome")
+    materialization, materialization_sha = _read_object(
+        materialization_path, "candidate materialization"
+    )
+    baseline, baseline_sha = _read_object(baseline_entry_path, "baseline entry")
+    if (
+        outcome.get("schema_version") != "deepread-candidate-outcome-v1"
+        or outcome.get("outcome") != "accepted"
+        or outcome.get("promotion_status") != "eligible_for_materialization"
+    ):
+        raise ValueError("preservation memory requires an accepted candidate outcome")
+    if (
+        materialization.get("schema_version")
+        != "deepread-candidate-materialization-v1"
+        or materialization.get("status") != "materialized_detached"
+    ):
+        raise ValueError("preservation memory requires a completed materialization")
+    expected_materialization_id = "materialization-" + _canonical_sha256(
+        {
+            "decision_id": materialization.get("decision_id"),
+            "outcome_record_sha256": materialization.get("outcome_record_sha256"),
+            "materialized_commit": materialization.get("materialized_commit"),
+        }
+    )[:20]
+    if materialization.get("materialization_id") != expected_materialization_id:
+        raise ValueError("candidate materialization identity is invalid")
+    if (
+        materialization.get("outcome_record_sha256") != outcome_sha
+        or Path(str(materialization.get("outcome_record") or "")).resolve()
+        != outcome_path
+        or materialization.get("decision_id") != outcome.get("decision_id")
+    ):
+        raise ValueError("materialization does not match accepted outcome")
+    if baseline.get("schema_version") != "deepread-baseline-entry-v1":
+        raise ValueError("unsupported baseline entry schema")
+    _validate_baseline_entry_identity(baseline)
+    if (
+        baseline.get("materialization_id") != materialization.get("materialization_id")
+        or baseline.get("materialization_sha256") != materialization_sha
+        or Path(str(baseline.get("materialization_path") or "")).resolve()
+        != materialization_path
+        or baseline.get("commit") != materialization.get("materialized_commit")
+    ):
+        raise ValueError("baseline entry does not match candidate materialization")
+
+    plan, plan_path, plan_sha = _pinned_artifact(
+        outcome, "modification_plan", "candidate outcome"
+    )
+    gate, gate_path, gate_sha = _pinned_artifact(
+        outcome, "validation_gate", "candidate outcome"
+    )
+    if gate.get("schema_version") != "deepread-validation-gate-v1" or not gate.get(
+        "passed"
+    ):
+        raise ValueError("accepted outcome does not reference a passing validation gate")
+    plan_id = str(outcome.get("plan_id") or "")
+    plans = [item for item in plan.get("plans") or [] if item.get("plan_id") == plan_id]
+    if len(plans) != 1 or plans[0].get("decision") != "proceed":
+        raise ValueError("accepted outcome must reference one proceeding plan")
+    selected = plans[0]
+    contract = selected.get("change_contract") or {}
+    paths = sorted(set((selected.get("edit_scope") or {}).get("allowed_paths") or []))
+    delta = str(contract.get("required_behavior_delta") or "").strip()
+    if not paths or not delta:
+        raise ValueError("accepted plan has no scope or behavior delta")
+    fingerprint = attempt_fingerprint(
+        allowed_paths=paths, required_behavior_delta=delta
+    )
+    gains = []
+    for cohort in gate.get("cohorts") or []:
+        if not isinstance(cohort, Mapping) or not cohort.get("passed"):
+            raise ValueError("accepted validation gate contains a failing cohort")
+        gains.append(
+            {
+                "name": str(cohort.get("name") or ""),
+                "dataset": str(cohort.get("dataset") or ""),
+                "role": str(cohort.get("role") or ""),
+                "mean_delta": cohort.get("mean_delta"),
+                "improved_task_count": len(cohort.get("improved_task_ids") or []),
+                "regressed_task_count": len(cohort.get("regressed_task_ids") or []),
+                "token_cost_ratio": cohort.get("token_cost_ratio"),
+                "task_ids_exposed": False,
+            }
+        )
+    if not gains:
+        raise ValueError("accepted validation gate has no cohort evidence")
+    source_decision_id = str(outcome.get("decision_id") or "")
+    baseline_id = str(baseline.get("baseline_id") or "")
+    preservation_id = "preservation-" + _canonical_sha256(
+        {
+            "source_decision_id": source_decision_id,
+            "baseline_id": baseline_id,
+            "attempt_fingerprint": fingerprint,
+        }
+    )[:20]
+    return {
+        "schema_version": PRESERVATION_MEMORY_SCHEMA,
+        "preservation_id": preservation_id,
+        "source_decision_id": source_decision_id,
+        "baseline_id": baseline_id,
+        "baseline_commit": str(baseline.get("commit") or ""),
+        "candidate_id": str(outcome.get("candidate_id") or ""),
+        "attempt": {
+            "plan_id": plan_id,
+            "hypothesis_id": str(selected.get("hypothesis_id") or ""),
+            "allowed_paths": paths,
+            "required_behavior_delta": delta,
+            "fingerprint": fingerprint,
+        },
+        "preservation_constraints": {
+            "must_preserve": list(contract.get("must_preserve") or []),
+            "non_goals": list(contract.get("non_goals") or []),
+            "regression_scenarios": list(
+                (selected.get("risk") or {}).get("regression_scenarios") or []
+            ),
+        },
+        "validated_gains": gains,
+        "artifacts": {
+            "candidate_outcome": {"path": str(outcome_path), "sha256": outcome_sha},
+            "modification_plan": {"path": str(plan_path), "sha256": plan_sha},
+            "validation_gate": {"path": str(gate_path), "sha256": gate_sha},
+            "materialization": {
+                "path": str(materialization_path),
+                "sha256": materialization_sha,
+            },
+            "baseline_entry": {
+                "path": str(baseline_entry_path),
+                "sha256": baseline_sha,
+            },
+        },
+    }
+
+
+def build_preservation_memory(
+    *,
+    outcome_path: Path,
+    materialization_path: Path,
+    baseline_entry_path: Path,
+    memory_root: Path,
+) -> tuple[dict[str, Any], Path]:
+    """Persist gains only after the accepted commit becomes a registered baseline."""
+
+    record = _derive_preservation_memory(
+        outcome_path=outcome_path,
+        materialization_path=materialization_path,
+        baseline_entry_path=baseline_entry_path,
+    )
+    if not all(
+        [
+            record["source_decision_id"],
+            record["baseline_id"],
+            record["baseline_commit"],
+            record["candidate_id"],
+            record["attempt"]["hypothesis_id"],
+        ]
+    ):
+        raise ValueError("accepted candidate lineage is incomplete")
+    destination = (
+        Path(memory_root).resolve()
+        / "accepted"
+        / f"{record['preservation_id']}.json"
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("x", encoding="utf-8") as stream:
+        json.dump(record, stream, ensure_ascii=False, indent=2)
+        stream.write("\n")
+    return record, destination
+
+
+def _validate_preservation_memory_record(memory: Mapping[str, Any]) -> None:
+    if memory.get("schema_version") != PRESERVATION_MEMORY_SCHEMA:
+        raise ValueError("unsupported preservation memory schema")
+    artifacts = memory.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise ValueError("preservation memory has no artifact lineage")
+    required = {"candidate_outcome", "materialization", "baseline_entry"}
+    if not required.issubset(artifacts):
+        raise ValueError("preservation memory artifact lineage is incomplete")
+    expected = _derive_preservation_memory(
+        outcome_path=Path(str(artifacts["candidate_outcome"].get("path") or "")),
+        materialization_path=Path(str(artifacts["materialization"].get("path") or "")),
+        baseline_entry_path=Path(str(artifacts["baseline_entry"].get("path") or "")),
+    )
+    if memory != expected:
+        raise ValueError("preservation memory projection is inconsistent")
 
 
 def _hypothesis_paths(
@@ -348,6 +601,47 @@ def validate_planning_memory_context(
             for field in ("attempt", "observed_failures", "constraints"):
                 if failure.get(field) != memory.get(field):
                     raise ValueError(f"planning memory {field} projection is inconsistent")
+        successes = entry.get("relevant_successes")
+        if not isinstance(successes, list) or len(successes) > maximum:
+            raise ValueError("planning memory relevant successes exceed their bound")
+        seen_preservations: set[str] = set()
+        for success in successes:
+            if not isinstance(success, Mapping):
+                raise ValueError("planning preservation entry must be an object")
+            artifact = success.get("memory_artifact")
+            if not isinstance(artifact, Mapping):
+                raise ValueError("planning preservation entry has no artifact reference")
+            memory, sha = _read_object(
+                Path(str(artifact.get("path") or "")), "preservation memory"
+            )
+            if sha != artifact.get("sha256"):
+                raise ValueError("preservation memory artifact hash does not match context")
+            _validate_preservation_memory_record(memory)
+            preservation_id = str(memory.get("preservation_id") or "")
+            if (
+                preservation_id != success.get("preservation_id")
+                or preservation_id in seen_preservations
+            ):
+                raise ValueError(
+                    "planning memory has mismatched or duplicate preservation ID"
+                )
+            seen_preservations.add(preservation_id)
+            overlap = sorted(
+                set(paths) & set(memory.get("attempt", {}).get("allowed_paths") or [])
+            )
+            if not overlap or success.get("overlapping_paths") != overlap:
+                raise ValueError("planning preservation source overlap is inconsistent")
+            for field in (
+                "attempt",
+                "preservation_constraints",
+                "validated_gains",
+                "baseline_id",
+                "baseline_commit",
+            ):
+                if success.get(field) != memory.get(field):
+                    raise ValueError(
+                        f"planning preservation {field} projection is inconsistent"
+                    )
     if seen_hypotheses != set(hypothesis_by_id):
         raise ValueError("planning memory is missing hypotheses")
 
@@ -380,6 +674,11 @@ def build_planning_memory_context(
             raise ValueError(f"unsupported repair memory schema: {path}")
         _validate_repair_memory_record(value)
         memories.append((value, path, sha))
+    preservations = []
+    for path in sorted((Path(memory_root).resolve() / "accepted").glob("*.json")):
+        value, sha = _read_object(path, "preservation memory")
+        _validate_preservation_memory_record(value)
+        preservations.append((value, path, sha))
     diagnoses = {
         str(item.get("task_id") or ""): item
         for item in cohort.get("eligible_diagnoses") or []
@@ -403,9 +702,33 @@ def build_planning_memory_context(
                         "memory_artifact": {"path": str(path), "sha256": sha},
                     }
                 )
+        successes = []
+        for memory, path, sha in preservations:
+            attempted_paths = set(memory.get("attempt", {}).get("allowed_paths") or [])
+            overlap = sorted(set(paths) & attempted_paths)
+            if overlap:
+                successes.append(
+                    {
+                        "preservation_id": memory.get("preservation_id"),
+                        "baseline_id": memory.get("baseline_id"),
+                        "baseline_commit": memory.get("baseline_commit"),
+                        "overlapping_paths": overlap,
+                        "attempt": memory.get("attempt"),
+                        "preservation_constraints": memory.get(
+                            "preservation_constraints"
+                        ),
+                        "validated_gains": memory.get("validated_gains"),
+                        "memory_artifact": {"path": str(path), "sha256": sha},
+                    }
+                )
         if len(matches) > max_entries_per_hypothesis:
             raise ValueError(
                 f"{hypothesis_id} has {len(matches)} relevant memories; "
+                f"refusing to truncate to {max_entries_per_hypothesis}"
+            )
+        if len(successes) > max_entries_per_hypothesis:
+            raise ValueError(
+                f"{hypothesis_id} has {len(successes)} relevant preservation memories; "
                 f"refusing to truncate to {max_entries_per_hypothesis}"
             )
         entries.append(
@@ -413,6 +736,7 @@ def build_planning_memory_context(
                 "hypothesis_id": hypothesis_id,
                 "affected_paths": paths,
                 "relevant_failures": matches,
+                "relevant_successes": successes,
             }
         )
 

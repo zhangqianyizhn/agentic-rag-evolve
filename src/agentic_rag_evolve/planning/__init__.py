@@ -5,6 +5,7 @@ from .hypotheses import HypothesisRunReport, run_hypothesis_aggregation
 from .hypothesis_validator import HypothesisValidationError, validate_hypotheses
 from .memory import (
     build_planning_memory_context,
+    build_preservation_memory,
     build_repair_memory,
     validate_planning_memory_context,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "ModificationPlanValidationError",
     "build_hypothesis_cohort",
     "build_planning_memory_context",
+    "build_preservation_memory",
     "build_repair_memory",
     "run_hypothesis_aggregation",
     "run_modification_planning",

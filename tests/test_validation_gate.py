@@ -4,7 +4,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agentic_rag_evolve.validation import evaluate_validation_gate
+from agentic_rag_evolve.validation import (
+    build_regression_feedback,
+    evaluate_validation_gate,
+)
 
 
 def _item(task_id: str, score: float, *, tokens: int = 100, status: str = "ok") -> dict:
@@ -19,10 +22,19 @@ def _item(task_id: str, score: float, *, tokens: int = 100, status: str = "ok") 
 
 
 class ValidationGateTest(unittest.TestCase):
-    def _write_inputs(self, root: Path, *, costly: bool = False, regress: bool = False):
+    def _write_inputs(
+        self,
+        root: Path,
+        *,
+        costly: bool = False,
+        regress: bool = False,
+        dev_regress: bool = False,
+    ):
         evaluations = {
             "dev-baseline.json": [_item("q1", 0.25)],
-            "dev-candidate.json": [_item("q1", 0.75, tokens=110)],
+            "dev-candidate.json": [
+                _item("q1", 0.0 if dev_regress else 0.75, tokens=110)
+            ],
             "hold-baseline.json": [_item("q2", 0.75)],
             "hold-candidate.json": [
                 _item("q2", 0.5 if regress else 0.75, tokens=200 if costly else 110)
@@ -79,6 +91,8 @@ class ValidationGateTest(unittest.TestCase):
             encoding="utf-8",
         )
         audit_path = root / "candidate-audit.json"
+        candidate_path = root / "candidate"
+        candidate_path.mkdir()
         audit_path.write_text(
             json.dumps(
                 {
@@ -89,6 +103,7 @@ class ValidationGateTest(unittest.TestCase):
                     "candidate_snapshot_sha256": "c" * 64,
                     "test_policy_id": "unit-v1",
                     "test_policy_sha256": "d" * 64,
+                    "candidate_path": str(candidate_path),
                     "passed": True,
                 }
             ),
@@ -121,6 +136,13 @@ class ValidationGateTest(unittest.TestCase):
             plan_path=paths[2],
             candidate_test_audit_path=paths[3],
         )
+
+    def _write_gate(self, root: Path, paths) -> Path:
+        gate_path = root / "gate.json"
+        gate_path.write_text(
+            json.dumps(self._evaluate(paths)), encoding="utf-8"
+        )
+        return gate_path
 
     def test_gate_passes_improved_development_and_stable_holdout(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -323,6 +345,107 @@ class ValidationGateTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "snapshot"):
                 self._evaluate(paths)
+
+    def test_regression_feedback_exposes_development_tasks_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root, regress=True, dev_regress=True)
+            gate_path = self._write_gate(root, paths)
+            feedback = build_regression_feedback(
+                gate_path=gate_path,
+                suite_path=paths[0],
+                candidate_audit_path=paths[1],
+                output_path=root / "feedback.json",
+            )
+
+            serialized = json.dumps(feedback)
+            self.assertEqual(feedback["status"], "ready")
+            self.assertEqual(feedback["diagnosis_scope"]["task_ids"], ["q1"])
+            self.assertEqual(
+                feedback["sealed_cohort_summaries"][0]["regressed_task_count"], 1
+            )
+            self.assertNotIn("q2", serialized)
+            self.assertNotIn("baseline_evaluation", feedback["sealed_cohort_summaries"][0])
+            self.assertFalse(feedback["final_test_accessed"])
+
+    def test_feedback_does_not_promote_holdout_regression_to_diagnosis(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root, regress=True)
+            gate_path = self._write_gate(root, paths)
+            feedback = build_regression_feedback(
+                gate_path=gate_path,
+                suite_path=paths[0],
+                candidate_audit_path=paths[1],
+                output_path=root / "feedback.json",
+            )
+
+            self.assertEqual(feedback["status"], "no_development_regressions")
+            self.assertEqual(feedback["diagnosis_scope"]["task_ids"], [])
+            self.assertNotIn("q2", json.dumps(feedback))
+
+    def test_feedback_rejects_tampered_validation_suite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root, dev_regress=True)
+            gate_path = self._write_gate(root, paths)
+            suite = json.loads(paths[0].read_text())
+            suite["comparison_epsilon"] = 0.5
+            paths[0].write_text(json.dumps(suite), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "suite hash"):
+                build_regression_feedback(
+                    gate_path=gate_path,
+                    suite_path=paths[0],
+                    candidate_audit_path=paths[1],
+                    output_path=root / "feedback.json",
+                )
+
+    def test_feedback_rejects_evaluation_changed_after_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root, dev_regress=True)
+            gate_path = self._write_gate(root, paths)
+            evaluation_path = root / "dev-candidate.json"
+            evaluation = json.loads(evaluation_path.read_text())
+            evaluation[0]["metrics"]["accuracy_normalized"] = 0.1
+            evaluation_path.write_text(json.dumps(evaluation), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "evaluation hash"):
+                build_regression_feedback(
+                    gate_path=gate_path,
+                    suite_path=paths[0],
+                    candidate_audit_path=paths[1],
+                    output_path=root / "feedback.json",
+                )
+
+    def test_feedback_is_deterministic_and_refuses_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root, dev_regress=True)
+            gate_path = self._write_gate(root, paths)
+            first_path = root / "feedback-1.json"
+            first = build_regression_feedback(
+                gate_path=gate_path,
+                suite_path=paths[0],
+                candidate_audit_path=paths[1],
+                output_path=first_path,
+            )
+            second = build_regression_feedback(
+                gate_path=gate_path,
+                suite_path=paths[0],
+                candidate_audit_path=paths[1],
+                output_path=root / "feedback-2.json",
+            )
+
+            self.assertEqual(first["feedback_id"], second["feedback_id"])
+            with self.assertRaises(FileExistsError):
+                build_regression_feedback(
+                    gate_path=gate_path,
+                    suite_path=paths[0],
+                    candidate_audit_path=paths[1],
+                    output_path=first_path,
+                )
 
 
 if __name__ == "__main__":

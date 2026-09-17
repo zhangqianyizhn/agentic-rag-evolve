@@ -23,7 +23,29 @@
 - candidate 预测异常数不超过 baseline；
 - answer 运行记录中的 input/output token 总量比例。
 
-development 与其余验证 cohort 按 `(dataset, task_id)` 必须互斥。问题文本和 sample ID 也必须在 baseline/candidate 两侧一致。
+development 与其余验证 cohort 按 `(dataset, task_id)` 必须互斥。问题文本和 sample ID 也必须在 baseline/candidate 两侧一致。每个 cohort 还会冻结 baseline/candidate evaluation 文件的 SHA256，供下游反馈和编排重新核验。
+
+## 回退反馈边界
+
+`runner/build_regression_feedback.py` 将一个已经落盘的 validation gate 转成 `deepread-regression-feedback-v1`。它重新核对 gate、suite 和 static audit 的 SHA256、candidate/plan/snapshot ID，并把 candidate snapshot 作为下一轮诊断的源码版本。
+
+```bash
+uv run python runner/build_regression_feedback.py \
+  --gate <development-gate.json> \
+  --suite <development-suite.json> \
+  --candidate-audit <candidate-audit.json> \
+  --output <regression-feedback.json>
+```
+
+该产物不是普通的门禁报告，而是下一轮诊断的权限边界：
+
+- 只有 `development` cohort 的回退 task ID 和 evaluation artifact 引用可以进入诊断；
+- `holdout` 与 `cross_dataset` 只保留 cohort 名称、数据集、回退数量、平均变化、token 比例和失败原因，不暴露 task ID 或 evaluation 路径；
+- 若只有 sealed cohort 回退，状态为 `no_development_regressions`，不会把这些题转成可诊断样本；
+- `test` 仍不属于 validation role，产物固定记录 `final_test_accessed: false`；
+- feedback ID 由 gate 哈希、candidate snapshot 与 development 回退集合确定，输出文件不可覆盖。
+
+这样借鉴 HarnessFix 的 regression feedback / rediagnosis 闭环时，不会把 validation 样本在失败后悄悄转成训练数据。后续诊断 bundle 构建器只应接受这里的 `diagnosis_scope.task_ids`，并在读取源码时重新核验 candidate snapshot。
 
 ## 与 HarnessFix 的差异
 
@@ -33,4 +55,4 @@ HarnessFix 的 validation gate 主要以 resolved 数量决定是否通过，并
 
 ## 当前边界
 
-目前已用合成评测产物验证协议、错误拒绝路径、promotion 成功路径和 accepted/rejected outcome registry。仓库中尚无满足 recurring hypothesis 与 `proceed` plan 的真实修复 candidate，因此没有伪造一次真实晋升结果。accepted candidate 的 Git materialization 与外层循环仍属于后续实现。
+目前已用合成评测产物验证协议、错误拒绝路径、promotion 成功路径、accepted/rejected outcome registry 和 development-only regression feedback。仓库中尚无满足 recurring hypothesis 与 `proceed` plan 的真实修复 candidate，因此没有伪造一次真实晋升结果。单轮外层编排仍属于后续实现。

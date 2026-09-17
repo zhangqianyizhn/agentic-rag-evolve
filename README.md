@@ -28,7 +28,7 @@ src/agentic_rag_evolve/
   diagnostics/              # evidence ladder、失败信号、受限输入包与报告
   diagnosis/                # 证据锚定的受限工具诊断 agent 与引用校验
   evolution/                # hypothesis/plan 后的 candidate 隔离、审计与终态记录
-  validation/               # development/promotion 行为门禁
+  validation/               # 行为门禁与 development-only 回退反馈
   deepread_runner.py        # 稳定单数据集执行协议
   reference_validation.py  # golden store/run 只读校验
 runner/                     # 框架 CLI；不属于被进化的 DeepRead
@@ -67,4 +67,4 @@ uv run python runner/build_bad_case_report.py --bundle <bundle_dir> --output <em
 uv run python runner/run_diagnosis.py --bundle <bundle.json> --source-root . --output <empty_diagnosis_dir>
 ```
 
-模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)，事件与轨迹协议见 [DeepRead trajectory](docs/trajectory.md)，诊断 triage 见 [确定性失败信号](docs/failure-signals.md)，诊断输出与引用门禁见 [证据锚定诊断协议](docs/diagnosis.md)，候选终态与固化见 [outcome registry](docs/outcome-registry.md)和[materialization](docs/materialization.md)，失败反馈见 [repair memory](docs/repair-memory.md)，演化基线见 [baseline registry](docs/baseline-registry.md)。
+模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)，事件与轨迹协议见 [DeepRead trajectory](docs/trajectory.md)，诊断 triage 见 [确定性失败信号](docs/failure-signals.md)，诊断输出与引用门禁见 [证据锚定诊断协议](docs/diagnosis.md)，行为门禁与回退再诊断边界见 [validation](docs/validation.md)，候选终态与固化见 [outcome registry](docs/outcome-registry.md)和[materialization](docs/materialization.md)，失败反馈见 [repair memory](docs/repair-memory.md)，演化基线见 [baseline registry](docs/baseline-registry.md)。

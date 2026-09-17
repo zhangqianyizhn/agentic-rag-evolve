@@ -205,7 +205,13 @@ def _pair_cohort(
         "failure_reasons": failures,
         "pairs": pairs,
         "baseline_evaluation": str(baseline_path),
+        "baseline_evaluation_sha256": hashlib.sha256(
+            baseline_path.read_bytes()
+        ).hexdigest(),
         "candidate_evaluation": str(candidate_path),
+        "candidate_evaluation_sha256": hashlib.sha256(
+            candidate_path.read_bytes()
+        ).hexdigest(),
     }
 
 

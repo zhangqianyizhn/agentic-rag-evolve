@@ -8,7 +8,7 @@
       "start_directory": "tests",
       "pattern": "test_*.py",
       "timeout_seconds": 300,
-      "minimum_tests": 146
+      "minimum_tests": 151
     }
   ]
 }

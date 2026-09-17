@@ -91,6 +91,7 @@
 - [x] 建立线性不可变 baseline registry，并用 durable Git ref 保存 materialized commit；
 - [x] 将 rejected outcome 转为可验证的紧凑 repair memory，并阻止完全相同的失败计划重试；
 - [x] 隔离 sealed validation 反馈，并从已登记 accepted baseline 生成 preservation memory；
+- [x] 将 development 回退显式导出为可重新诊断的 feedback artifact，同时只保留 sealed cohort 聚合；
 - 编排可恢复的单轮外层循环；
 - [x] 在验证协议中拒绝 final test role，使其不参与 candidate 选择。
 

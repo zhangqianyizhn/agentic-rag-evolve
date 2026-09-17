@@ -16,6 +16,7 @@ def main() -> int:
     parser.add_argument("--cohort", type=Path, required=True)
     parser.add_argument("--hypotheses", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--memory-context", type=Path)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--max-output-tokens", type=int)
     parser.add_argument("--request-timeout", type=int, default=1800)
@@ -35,6 +36,7 @@ def main() -> int:
             retry_max_seconds=args.request_retry_max_seconds,
         ),
         max_output_tokens=args.max_output_tokens,
+        memory_context_path=args.memory_context,
     )
     print(json.dumps(report.to_dict(), ensure_ascii=False))
     return 0 if report.status in {"ok", "no_plannable_hypotheses"} else 1

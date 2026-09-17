@@ -89,7 +89,8 @@
 - [x] 以不可变 outcome record 保存 accepted/rejected candidate revision；
 - [x] 将 accepted revision 物化为确定性的 detached Git commit；
 - [x] 建立线性不可变 baseline registry，并用 durable Git ref 保存 materialized commit；
-- 编排单轮外层循环，并将 rejected outcome 转为下一轮约束；
+- [x] 将 rejected outcome 转为可验证的紧凑 repair memory，并阻止完全相同的失败计划重试；
+- 编排可恢复的单轮外层循环；
 - [x] 在验证协议中拒绝 final test role，使其不参与 candidate 选择。
 
 完成条件：可以从 v0 自动完成一轮诊断、修改和候选晋升，并完整复现实验谱系。

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agentic_rag_evolve.planning import (
     ModificationPlanValidationError,
+    build_planning_memory_context,
     run_modification_planning,
     validate_modification_plan,
 )
@@ -224,6 +225,40 @@ class ModificationPlanningTest(unittest.TestCase):
         self.assertEqual(candidate, invalid)
         self.assertEqual(audit["status"], "ok")
         self.assertEqual(len(audit["events"]), 2)
+
+    def test_agent_receives_audited_memory_context(self) -> None:
+        model = FakeModel(
+            [{"choices": [{"message": {"content": json.dumps(_plan())}}]}]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cohort_path = root / "cohort.json"
+            hypotheses_path = root / "hypotheses.json"
+            memory_path = root / "memory.json"
+            output_path = root / "plan.json"
+            cohort_path.write_text(json.dumps(_cohort()))
+            hypotheses_path.write_text(json.dumps(_hypotheses()))
+            context = build_planning_memory_context(
+                memory_root=root / "empty-memory",
+                cohort_path=cohort_path,
+                hypotheses_path=hypotheses_path,
+                output_path=memory_path,
+            )
+
+            report = run_modification_planning(
+                cohort_path=cohort_path,
+                hypotheses_path=hypotheses_path,
+                output_path=output_path,
+                model=model,
+                memory_context_path=memory_path,
+            )
+            audit = json.loads((root / "plan.audit.json").read_text())
+
+        user_payload = json.loads(model.calls[0]["messages"][1]["content"])
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(user_payload["planning_memory"], context)
+        self.assertEqual(audit["memory_context"]["path"], str(memory_path.resolve()))
+        self.assertEqual(len(audit["memory_context"]["sha256"]), 64)
 
 
 if __name__ == "__main__":

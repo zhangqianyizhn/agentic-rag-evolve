@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Mapping, Sequence
 
+from .memory import CONTEXT_SCHEMA, attempt_fingerprint
+
 
 FORBIDDEN_ROOTS = [
     ".env",
@@ -109,6 +111,7 @@ def validate_modification_plan(
     *,
     cohort: Mapping[str, Any],
     hypotheses: Mapping[str, Any],
+    memory_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     result = dict(_object(value, "modification_plan"))
     _exact(
@@ -123,6 +126,20 @@ def validate_modification_plan(
         raise ModificationPlanValidationError("cohort_id does not match input")
     if result.get("hypothesis_set_status") != hypotheses.get("status"):
         raise ModificationPlanValidationError("hypothesis_set_status does not match input")
+
+    prior_fingerprints: dict[str, set[str]] = {}
+    if memory_context is not None:
+        if memory_context.get("schema_version") != CONTEXT_SCHEMA:
+            raise ModificationPlanValidationError("unsupported planning memory context schema")
+        if memory_context.get("cohort_id") != cohort_id:
+            raise ModificationPlanValidationError("memory context cohort_id does not match input")
+        for entry in memory_context.get("entries") or []:
+            hypothesis_id = str(entry.get("hypothesis_id") or "")
+            fingerprints = prior_fingerprints.setdefault(hypothesis_id, set())
+            for failure in entry.get("relevant_failures") or []:
+                fingerprint = str((failure.get("attempt") or {}).get("fingerprint") or "")
+                if fingerprint:
+                    fingerprints.add(fingerprint)
 
     hypothesis_by_id = {
         str(item["hypothesis_id"]): item for item in hypotheses.get("hypotheses") or []
@@ -236,6 +253,15 @@ def validate_modification_plan(
         if level not in {"low", "medium", "high"}:
             raise ModificationPlanValidationError(f"{field}.risk.level is unsupported")
         unique_paths = sorted({item["path"] for item in source_refs})
+        if decision == "proceed":
+            fingerprint = attempt_fingerprint(
+                allowed_paths=unique_paths,
+                required_behavior_delta=contract["required_behavior_delta"],
+            )
+            if fingerprint in prior_fingerprints.get(hypothesis_id, set()):
+                raise ModificationPlanValidationError(
+                    f"{field} exactly repeats a rejected attempt"
+                )
         stable_key = f"{cohort_id}:{hypothesis_id}"
         normalized.append(
             {

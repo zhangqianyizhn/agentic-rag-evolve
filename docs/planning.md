@@ -64,9 +64,12 @@ python runner/run_hypothesis_aggregation.py \
 python runner/run_modification_planning.py \
   --cohort <hypothesis-cohort.json> \
   --hypotheses <improvement-hypotheses.json> \
+  --memory-context <optional-planning-memory.json> \
   --output <modification-plan.json> \
   --env-file .env
 ```
+
+当已有 rejected candidate 时，先按 [repair memory](repair-memory.md) 生成与当前 hypotheses 绑定的紧凑上下文。planner 会复核其 artifact 谱系；完全重复的历史失败 attempt 即使模型再次提出，也会被 validator 拒绝。
 
 ## Candidate isolation and static audit
 

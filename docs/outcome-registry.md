@@ -30,4 +30,4 @@ uv run python runner/record_candidate_outcome.py \
   --validation-gate <promotion-gate.json>
 ```
 
-本模块不读取 final test，也不自动提交 accepted candidate。具体状态决策见 [ADR 0003](decisions/0003-candidate-outcomes.md)，后续固化协议见 [materialization](materialization.md)。
+本模块不读取 final test，也不自动提交 accepted candidate。具体状态决策见 [ADR 0003](decisions/0003-candidate-outcomes.md)，accepted 固化协议见 [materialization](materialization.md)，rejected 反馈协议见 [repair memory](repair-memory.md)。

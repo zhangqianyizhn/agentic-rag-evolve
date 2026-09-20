@@ -95,7 +95,8 @@
 - [x] 将 development 回退显式导出为可重新诊断的 feedback artifact，同时只保留 sealed cohort 聚合；
 - [x] 为 modification planner 提供 hypothesis-scope 源码读取，并在 candidate 模式复核完整 snapshot；
 - [x] 生成不复制大产物、不泄漏 validation task ID 的终态 iteration report；
-- 编排可恢复的单轮外层循环；
+- [x] 建立 hash-chain 单轮账本，支持失败不推进、同阶段重试与 accepted/rejected 分支恢复；
+- 编排各阶段的自动执行器，并在真实小样本上完成全流程；
 - [x] 在验证协议中拒绝 final test role，使其不参与 candidate 选择。
 
 完成条件：可以从 v0 自动完成一轮诊断、修改和候选晋升，并完整复现实验谱系。

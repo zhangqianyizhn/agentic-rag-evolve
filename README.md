@@ -30,6 +30,7 @@ src/agentic_rag_evolve/
   evolution/                # hypothesis/plan 后的 candidate 隔离、审计与终态记录
   validation/               # 行为门禁与 development-only 回退反馈
   reporting/                # 已完成演化轮次的紧凑可复核投影
+  orchestration/            # hash-chain 单轮账本与中断恢复状态
   deepread_runner.py        # 稳定单数据集执行协议
   reference_validation.py  # golden store/run 只读校验
 runner/                     # 框架 CLI；不属于被进化的 DeepRead

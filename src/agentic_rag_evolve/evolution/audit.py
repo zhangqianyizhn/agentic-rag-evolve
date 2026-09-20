@@ -104,6 +104,7 @@ def audit_candidate(
     *,
     manifest_path: Path,
     plan_path: Path,
+    modification_path: Path | None = None,
     command_runner: CommandRunner = _run,
 ) -> dict[str, Any]:
     manifest_path = Path(manifest_path)
@@ -116,6 +117,28 @@ def audit_candidate(
     snapshot_sha256 = candidate_snapshot_sha256(
         candidate_path, head_commit=head, changed_paths=changed_paths
     )
+    modification_sha256 = None
+    modification_violations: list[str] = []
+    if modification_path is not None:
+        modification_bytes = Path(modification_path).read_bytes()
+        modification_sha256 = hashlib.sha256(modification_bytes).hexdigest()
+        modification = json.loads(modification_bytes)
+        if modification.get("schema_version") != "deepread-candidate-modification-v1":
+            modification_violations.append("unsupported_modification_schema")
+        if modification.get("status") != "modified":
+            modification_violations.append("modification_not_completed")
+        if modification.get("candidate_manifest_sha256") != hashlib.sha256(
+            manifest_path.read_bytes()
+        ).hexdigest():
+            modification_violations.append("modification_manifest_mismatch")
+        if modification.get("plan_sha256") != manifest.get("plan_sha256"):
+            modification_violations.append("modification_plan_mismatch")
+        if modification.get("base_commit") != head:
+            modification_violations.append("modification_head_mismatch")
+        if sorted(modification.get("changed_paths") or []) != changed_paths:
+            modification_violations.append("modification_changed_paths_mismatch")
+        if modification.get("candidate_snapshot_sha256") != snapshot_sha256:
+            modification_violations.append("modification_snapshot_mismatch")
     scope = plan.get("edit_scope") or {}
     allowed_paths = set(str(item) for item in scope.get("allowed_paths") or [])
     forbidden_roots = [str(item) for item in scope.get("forbidden_roots") or []]
@@ -166,6 +189,7 @@ def audit_candidate(
         violations.append("python_syntax_errors")
     if diff_check.returncode != 0 or diff_check.stdout or diff_check.stderr:
         violations.append("git_diff_check_failed")
+    violations.extend(modification_violations)
     return {
         "schema_version": "deepread-candidate-audit-v1",
         "candidate_manifest_sha256": hashlib.sha256(
@@ -180,6 +204,7 @@ def audit_candidate(
         "head_commit": head,
         "candidate_path": str(candidate_path),
         "candidate_snapshot_sha256": snapshot_sha256,
+        "modification_sha256": modification_sha256,
         "passed": not violations,
         "changed_paths": changed_paths,
         "changed_file_count": len(changed_paths),

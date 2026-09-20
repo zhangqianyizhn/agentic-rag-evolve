@@ -75,6 +75,7 @@
 - [x] 建立 repair-eligible diagnosis cohort，并隔离 evaluation/data review 与证据不足样本；
 - [x] 将相似诊断归并为可证伪的 improvement hypothesis（协议、validator 与空 cohort 已验证；真实 recurring cohort 待合格诊断样本齐备）；
 - [x] 声明目标 cohort、潜在副作用、允许修改范围和验证计划；
+- [x] 实现受冻结 plan scope 约束、无通用 shell 权限的 candidate modification agent；
 - [x] 实现 detached worktree candidate 隔离与 manifest 冻结（真实 candidate 等待 recurring `proceed` plan）；
 - [x] 独立执行 diff/范围/静态审计；
 - [x] 独立执行 candidate 固定测试审计，并冻结测试前后源码快照；

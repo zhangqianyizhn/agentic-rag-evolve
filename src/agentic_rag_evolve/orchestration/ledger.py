@@ -12,6 +12,7 @@ BASE_STEPS = (
     "baseline_run",
     "evaluation",
     "trajectories",
+    "diagnostic_bundles",
     "diagnoses",
     "hypothesis_cohort",
     "hypotheses",

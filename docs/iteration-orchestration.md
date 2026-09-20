@@ -37,4 +37,4 @@ runbook 的结构如下。路径相对 `workspace`；glob 只允许相对路径�
 
 执行器只运行 ledger 报告的 `next_step`。命令失败或产物缺失/协议不符时写入 failed event，next step 保持不变；修复外部条件后再次运行即可重试。已完成步骤的输入产物或 runbook 一旦变化，恢复校验会失败，避免在不知情的情况下混合两次实验。
 
-当前固定阶段为 baseline run、evaluation、trajectory、diagnosis、hypothesis/plan、candidate 创建与修改、两级审计、validation gate、outcome，以及按 outcome 选择的终态分支。accepted 必须继续 materialization 和 baseline advance；rejected 直接进入 repair memory。两者最终都生成 iteration report。
+当前固定阶段为 baseline run、evaluation、trajectory、diagnostic bundle、diagnosis、hypothesis/plan、candidate 创建与修改、两级审计、validation gate、outcome，以及按 outcome 选择的终态分支。accepted 必须继续 materialization 和 baseline advance；rejected 直接进入 repair memory。两者最终都生成 iteration report。

@@ -496,6 +496,18 @@ def _validate_preservation_memory_record(memory: Mapping[str, Any]) -> None:
         raise ValueError("preservation memory projection is inconsistent")
 
 
+def validate_repair_memory(value: Mapping[str, Any]) -> None:
+    """Public integrity check for one persisted rejected-candidate memory."""
+
+    _validate_repair_memory_record(value)
+
+
+def validate_preservation_memory(value: Mapping[str, Any]) -> None:
+    """Public integrity check for one persisted accepted-candidate memory."""
+
+    _validate_preservation_memory_record(value)
+
+
 def _hypothesis_paths(
     hypothesis: Mapping[str, Any], diagnoses: Mapping[str, Mapping[str, Any]]
 ) -> list[str]:

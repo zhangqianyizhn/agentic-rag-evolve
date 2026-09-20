@@ -7,7 +7,9 @@ from .memory import (
     build_planning_memory_context,
     build_preservation_memory,
     build_repair_memory,
+    validate_preservation_memory,
     validate_planning_memory_context,
+    validate_repair_memory,
 )
 from .plans import ModificationPlanReport, run_modification_planning
 from .plan_validator import ModificationPlanValidationError, validate_modification_plan
@@ -28,5 +30,7 @@ __all__ = [
     "validate_hypotheses",
     "validate_modification_plan",
     "validate_planning_memory_context",
+    "validate_preservation_memory",
+    "validate_repair_memory",
     "write_hypothesis_cohort",
 ]

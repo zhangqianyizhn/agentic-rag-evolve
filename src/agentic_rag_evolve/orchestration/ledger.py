@@ -26,6 +26,7 @@ BASE_STEPS = (
 )
 ACCEPTED_TAIL = ("materialization", "baseline_advanced", "terminal_memory", "iteration_report")
 REJECTED_TAIL = ("terminal_memory", "iteration_report")
+NO_CANDIDATE_TAIL = ("iteration_report",)
 
 STEP_SCHEMAS = {
     "hypothesis_cohort": "deepread-hypothesis-cohort-v1",
@@ -94,6 +95,9 @@ def _expected_sequence(outcome: str | None) -> tuple[str, ...]:
         return BASE_STEPS + ACCEPTED_TAIL
     if outcome == "rejected":
         return BASE_STEPS + REJECTED_TAIL
+    if outcome == "no_candidate":
+        plan_index = BASE_STEPS.index("modification_plan")
+        return BASE_STEPS[: plan_index + 1] + NO_CANDIDATE_TAIL
     return BASE_STEPS
 
 
@@ -125,6 +129,15 @@ def _read_and_verify(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], 
             if event.get("step") != expected:
                 raise ValueError(f"unexpected completed iteration step: {event.get('step')}")
             completed.append(expected)
+            if expected == "modification_plan":
+                primary = (event.get("artifacts") or {}).get("primary") or {}
+                value, _ = _read_object(Path(str(primary.get("path") or "")), "modification plan")
+                proceeding = [
+                    item for item in value.get("plans") or []
+                    if isinstance(item, Mapping) and item.get("decision") == "proceed"
+                ]
+                if not proceeding:
+                    outcome = "no_candidate"
             if expected == "outcome":
                 primary = (event.get("artifacts") or {}).get("primary") or {}
                 value, _ = _read_object(Path(str(primary.get("path") or "")), "candidate outcome")

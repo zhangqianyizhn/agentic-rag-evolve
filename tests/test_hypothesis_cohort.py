@@ -5,6 +5,7 @@ from pathlib import Path
 
 from agentic_rag_evolve.planning import (
     build_hypothesis_cohort,
+    build_hypothesis_cohort_with_audits,
     write_hypothesis_cohort,
 )
 
@@ -80,6 +81,31 @@ class HypothesisCohortTest(unittest.TestCase):
 
             with self.assertRaises(FileExistsError):
                 write_hypothesis_cohort([source], output)
+
+    def test_skipped_diagnosis_audit_is_explicitly_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit = root / "audit.json"
+            audit.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "deepread-diagnosis-audit-v1",
+                        "task_id": "q1",
+                        "status": "skipped",
+                        "route": {
+                            "eligible": False,
+                            "target": "answer_judge",
+                            "reason": "Judge first.",
+                        },
+                        "reason": "Judge first.",
+                    }
+                )
+            )
+            cohort = build_hypothesis_cohort_with_audits([], [audit])
+
+        self.assertEqual(cohort["counts"], {"input": 1, "eligible": 0, "excluded": 1})
+        self.assertEqual(cohort["excluded_diagnoses"][0]["status"], "diagnosis_skipped")
+        self.assertEqual(cohort["excluded_diagnoses"][0]["route"], "answer_judge")
 
 
 if __name__ == "__main__":

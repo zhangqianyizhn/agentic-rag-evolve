@@ -25,6 +25,8 @@ def _artifact(root: Path, step: str, *, outcome: str | None = None) -> Path:
             else "deepread-repair-memory-v1"
         )
     value = {"schema_version": schema, "step": step}
+    if step == "modification_plan":
+        value["plans"] = [{"decision": "proceed"}]
     if step == "outcome":
         value["outcome"] = outcome
     path = root / f"{step}.json"
@@ -115,6 +117,34 @@ class IterationLedgerTest(unittest.TestCase):
 
         self.assertTrue(status["terminal"])
         self.assertNotIn("materialization", status["completed_steps"])
+
+    def test_empty_plan_short_circuits_to_report(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "ledger"
+            self._init(root)
+            through_plan = BASE_STEPS[: BASE_STEPS.index("modification_plan") + 1]
+            for step in through_plan:
+                artifact = _artifact(base, step)
+                if step == "modification_plan":
+                    artifact.write_text(
+                        json.dumps(
+                            {
+                                "schema_version": "deepread-modification-plan-v1",
+                                "plans": [],
+                            }
+                        )
+                    )
+                append_iteration_event(
+                    root=root,
+                    step=step,
+                    status="completed",
+                    artifacts={"primary": artifact},
+                )
+            status = read_iteration_status(root=root)
+
+        self.assertEqual(status["outcome"], "no_candidate")
+        self.assertEqual(status["next_step"], "iteration_report")
 
     def test_artifact_tampering_breaks_resume(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -1,6 +1,10 @@
 """Planning inputs derived from validated DeepRead diagnoses."""
 
-from .cohort import build_hypothesis_cohort, write_hypothesis_cohort
+from .cohort import (
+    build_hypothesis_cohort,
+    build_hypothesis_cohort_with_audits,
+    write_hypothesis_cohort,
+)
 from .hypotheses import HypothesisRunReport, run_hypothesis_aggregation
 from .hypothesis_validator import HypothesisValidationError, validate_hypotheses
 from .memory import (
@@ -22,6 +26,7 @@ __all__ = [
     "ModificationPlanValidationError",
     "PlanningSourceReader",
     "build_hypothesis_cohort",
+    "build_hypothesis_cohort_with_audits",
     "build_planning_memory_context",
     "build_preservation_memory",
     "build_repair_memory",

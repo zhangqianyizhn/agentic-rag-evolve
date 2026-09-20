@@ -97,6 +97,7 @@
 - [x] 生成不复制大产物、不泄漏 validation task ID 的终态 iteration report；
 - [x] 建立 hash-chain 单轮账本，支持失败不推进、同阶段重试与 accepted/rejected 分支恢复；
 - [x] 用冻结 runbook 自动执行/恢复各阶段，并将 stdout/stderr 摘要作为账本证据；
+- [x] 支持诊断跳过、空 repair cohort 和无 candidate 的合法短路终态；
 - 在真实小样本上完成全流程；
 - [x] 在验证协议中拒绝 final test role，使其不参与 candidate 选择。
 

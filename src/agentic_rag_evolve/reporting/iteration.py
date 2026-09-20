@@ -282,6 +282,9 @@ def build_iteration_report(
     plan, plan_ref = _pinned_artifact(
         outcome, "modification_plan", "deepread-modification-plan-v1"
     )
+    modification, modification_ref = _pinned_artifact(
+        outcome, "candidate_modification", "deepread-candidate-modification-v1"
+    )
     audit, audit_ref = _pinned_artifact(
         outcome, "candidate_audit", "deepread-candidate-audit-v1"
     )
@@ -297,6 +300,10 @@ def build_iteration_report(
     _validate_outcome_identity(outcome, outcome_ref, gate_ref)
     if audit.get("candidate_manifest_sha256") != manifest_ref["sha256"]:
         raise ValueError("candidate audit is not bound to manifest")
+    if modification.get("candidate_manifest_sha256") != manifest_ref["sha256"]:
+        raise ValueError("candidate modification is not bound to manifest")
+    if audit.get("modification_sha256") != modification_ref["sha256"]:
+        raise ValueError("candidate audit is not bound to candidate modification")
     if test_audit.get("candidate_audit_sha256") != audit_ref["sha256"]:
         raise ValueError("candidate test audit is not bound to static audit")
     if gate.get("candidate_audit_sha256") != audit_ref["sha256"]:
@@ -309,6 +316,7 @@ def build_iteration_report(
         value != plan_ref["sha256"]
         for value in (
             manifest.get("plan_sha256"),
+            modification.get("plan_sha256"),
             audit.get("plan_sha256"),
             test_audit.get("plan_sha256"),
             gate.get("plan_sha256"),
@@ -319,6 +327,7 @@ def build_iteration_report(
         expected = outcome.get(field)
         for label, artifact in (
             ("manifest", manifest),
+            ("modification", modification),
             ("audit", audit),
             ("test audit", test_audit),
             ("gate", gate),
@@ -327,6 +336,7 @@ def build_iteration_report(
                 raise ValueError(f"{label} {field} does not match outcome")
     snapshot = outcome.get("candidate_snapshot_sha256")
     for label, value in (
+        ("modification", modification.get("candidate_snapshot_sha256")),
         ("audit", audit.get("candidate_snapshot_sha256")),
         ("test audit", test_audit.get("candidate_snapshot_sha256")),
         ("gate", gate.get("candidate_snapshot_sha256")),
@@ -473,6 +483,7 @@ def build_iteration_report(
             "hypothesis_cohort": cohort_ref,
             "improvement_hypotheses": hypotheses_ref,
             "modification_plan": plan_ref,
+            "candidate_modification": modification_ref,
             "candidate_audit": audit_ref,
             "candidate_test_audit": test_audit_ref,
             "candidate_outcome": outcome_ref,

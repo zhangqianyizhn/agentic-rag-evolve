@@ -82,6 +82,16 @@ class CandidateMaterializationTest(unittest.TestCase):
             artifacts / "plan.json",
             {"schema_version": "deepread-modification-plan-v1"},
         )
+        modification = _write(
+            artifacts / "modification.json",
+            {
+                "schema_version": "deepread-candidate-modification-v1",
+                "candidate_id": "candidate-1",
+                "plan_id": "plan-1",
+                "candidate_snapshot_sha256": snapshot,
+                "status": "modified",
+            },
+        )
         audit = _write(
             artifacts / "audit.json",
             {
@@ -92,6 +102,7 @@ class CandidateMaterializationTest(unittest.TestCase):
                 "head_commit": base,
                 "candidate_path": str(candidate.resolve()),
                 "candidate_snapshot_sha256": snapshot,
+                "modification_sha256": _sha(modification),
                 "changed_paths": [CHANGED],
                 "passed": True,
             },
@@ -111,6 +122,10 @@ class CandidateMaterializationTest(unittest.TestCase):
         references = {
             "candidate_manifest": {"path": str(manifest), "sha256": _sha(manifest)},
             "modification_plan": {"path": str(plan), "sha256": _sha(plan)},
+            "candidate_modification": {
+                "path": str(modification),
+                "sha256": _sha(modification),
+            },
             "candidate_audit": {"path": str(audit), "sha256": _sha(audit)},
             "candidate_test_audit": {
                 "path": str(test_audit),

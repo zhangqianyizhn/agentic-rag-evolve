@@ -100,6 +100,20 @@ class IterationReportTest(unittest.TestCase):
                 "candidate_path": str(root / "candidate"),
             },
         )
+        modification = _write(
+            root / "modification.json",
+            {
+                "schema_version": "deepread-candidate-modification-v1",
+                "candidate_manifest_sha256": _sha(manifest),
+                "candidate_id": "candidate-1",
+                "plan_id": "plan-1",
+                "plan_sha256": _sha(plan),
+                "base_commit": "a" * 40,
+                "candidate_path": str(root / "candidate"),
+                "candidate_snapshot_sha256": "c" * 64,
+                "status": "modified",
+            },
+        )
         audit = _write(
             root / "audit.json",
             {
@@ -114,6 +128,7 @@ class IterationReportTest(unittest.TestCase):
                 "head_commit": "a" * 40,
                 "candidate_path": str(root / "candidate"),
                 "candidate_snapshot_sha256": "c" * 64,
+                "modification_sha256": _sha(modification),
                 "changed_paths": [SOURCE],
                 "changed_file_count": 1,
                 "passed": True,
@@ -206,6 +221,7 @@ class IterationReportTest(unittest.TestCase):
             registry_root=root / "outcomes",
             candidate_manifest_path=manifest,
             plan_path=plan,
+            candidate_modification_path=modification,
             candidate_audit_path=audit,
             candidate_test_audit_path=test_audit,
             validation_suite_path=suite,

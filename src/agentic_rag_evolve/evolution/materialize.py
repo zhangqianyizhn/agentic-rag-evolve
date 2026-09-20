@@ -16,6 +16,7 @@ GitRunner = Callable[..., subprocess.CompletedProcess[str]]
 ARTIFACT_KEYS = {
     "candidate_manifest",
     "modification_plan",
+    "candidate_modification",
     "candidate_audit",
     "candidate_test_audit",
     "validation_suite",
@@ -95,11 +96,21 @@ def materialize_accepted_candidate(
         raise ValueError("candidate outcome decision_id is invalid")
 
     manifest, _ = _load_json(artifacts["candidate_manifest"], "candidate manifest")
+    modification, modification_sha = _load_json(
+        artifacts["candidate_modification"], "candidate modification"
+    )
     audit, _ = _load_json(artifacts["candidate_audit"], "candidate audit")
     if manifest.get("schema_version") != "deepread-candidate-manifest-v1":
         raise ValueError("unsupported candidate manifest schema")
     if audit.get("schema_version") != "deepread-candidate-audit-v1" or not audit.get("passed"):
         raise ValueError("candidate static audit is not passing")
+    if (
+        modification.get("schema_version") != "deepread-candidate-modification-v1"
+        or modification.get("status") != "modified"
+    ):
+        raise ValueError("candidate modification is not complete")
+    if audit.get("modification_sha256") != modification_sha:
+        raise ValueError("candidate audit is not bound to candidate modification")
     for field in ("candidate_id", "plan_id", "base_commit", "candidate_path"):
         expected = outcome.get(field)
         if manifest.get(field) != expected:
@@ -110,6 +121,8 @@ def materialize_accepted_candidate(
     snapshot = str(outcome.get("candidate_snapshot_sha256") or "")
     if audit.get("candidate_snapshot_sha256") != snapshot:
         raise ValueError("candidate audit snapshot does not match outcome")
+    if modification.get("candidate_snapshot_sha256") != snapshot:
+        raise ValueError("candidate modification snapshot does not match outcome")
     changed_paths = audit.get("changed_paths")
     if not isinstance(changed_paths, list) or not changed_paths:
         raise ValueError("accepted candidate has no audited changes")

@@ -38,6 +38,20 @@ class CandidateRegistryTest(unittest.TestCase):
                 "candidate_path": str(root / "candidate"),
             },
         )
+        modification_path = _write(
+            root / "modification.json",
+            {
+                "schema_version": "deepread-candidate-modification-v1",
+                "candidate_manifest_sha256": _sha(manifest_path),
+                "candidate_id": "candidate-1",
+                "plan_id": "plan-1",
+                "plan_sha256": _sha(plan_path),
+                "base_commit": "a" * 40,
+                "candidate_path": str(root / "candidate"),
+                "candidate_snapshot_sha256": "c" * 64,
+                "status": "modified",
+            },
+        )
         audit_path = _write(
             root / "audit.json",
             {
@@ -52,6 +66,7 @@ class CandidateRegistryTest(unittest.TestCase):
                 "head_commit": "a" * 40,
                 "candidate_path": str(root / "candidate"),
                 "candidate_snapshot_sha256": "c" * 64,
+                "modification_sha256": _sha(modification_path),
                 "passed": True,
             },
         )
@@ -136,6 +151,7 @@ class CandidateRegistryTest(unittest.TestCase):
             "registry_root": root / "registry",
             "candidate_manifest_path": manifest_path,
             "plan_path": plan_path,
+            "candidate_modification_path": modification_path,
             "candidate_audit_path": audit_path,
             "candidate_test_audit_path": test_audit_path,
             "validation_suite_path": suite_path,

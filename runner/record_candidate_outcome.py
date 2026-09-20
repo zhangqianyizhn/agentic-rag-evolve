@@ -15,6 +15,7 @@ def main() -> int:
     parser.add_argument("--registry-root", type=Path, required=True)
     parser.add_argument("--candidate-manifest", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
+    parser.add_argument("--candidate-modification", type=Path, required=True)
     parser.add_argument("--candidate-audit", type=Path, required=True)
     parser.add_argument("--candidate-test-audit", type=Path, required=True)
     parser.add_argument("--validation-suite", type=Path, required=True)
@@ -24,6 +25,7 @@ def main() -> int:
         registry_root=args.registry_root,
         candidate_manifest_path=args.candidate_manifest,
         plan_path=args.plan,
+        candidate_modification_path=args.candidate_modification,
         candidate_audit_path=args.candidate_audit,
         candidate_test_audit_path=args.candidate_test_audit,
         validation_suite_path=args.validation_suite,

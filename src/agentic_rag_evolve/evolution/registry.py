@@ -57,6 +57,7 @@ def record_candidate_outcome(
     registry_root: Path,
     candidate_manifest_path: Path,
     plan_path: Path,
+    candidate_modification_path: Path,
     candidate_audit_path: Path,
     candidate_test_audit_path: Path,
     validation_suite_path: Path,
@@ -66,6 +67,9 @@ def record_candidate_outcome(
 
     manifest, manifest_sha = _read(candidate_manifest_path, "candidate manifest")
     plan, plan_sha = _read(plan_path, "modification plan")
+    modification, modification_sha = _read(
+        candidate_modification_path, "candidate modification"
+    )
     audit, audit_sha = _read(candidate_audit_path, "candidate audit")
     test_audit, test_audit_sha = _read(
         candidate_test_audit_path, "candidate test audit"
@@ -74,6 +78,9 @@ def record_candidate_outcome(
     gate, gate_sha = _read(validation_gate_path, "validation gate")
     _require_schema(manifest, "deepread-candidate-manifest-v1", "candidate manifest")
     _require_schema(plan, "deepread-modification-plan-v1", "modification plan")
+    _require_schema(
+        modification, "deepread-candidate-modification-v1", "candidate modification"
+    )
     _require_schema(audit, "deepread-candidate-audit-v1", "candidate audit")
     _require_schema(
         test_audit, "deepread-candidate-test-audit-v1", "candidate test audit"
@@ -107,6 +114,7 @@ def record_candidate_outcome(
         raise ValueError("candidate outcome requires one proceeding plan")
 
     _same("manifest plan hash", manifest.get("plan_sha256"), plan_sha)
+    _same("modification plan hash", plan_sha, modification.get("plan_sha256"))
     _same("static audit plan hash", plan_sha, audit.get("plan_sha256"))
     _same("test audit plan hash", plan_sha, test_audit.get("plan_sha256"))
     _same("validation gate plan hash", plan_sha, gate.get("plan_sha256"))
@@ -116,13 +124,25 @@ def record_candidate_outcome(
         audit.get("candidate_manifest_sha256"),
     )
     _same(
+        "modification manifest hash",
+        manifest_sha,
+        modification.get("candidate_manifest_sha256"),
+    )
+    _same("static audit modification hash", modification_sha, audit.get("modification_sha256"))
+    _same(
         "static audit base commit", manifest.get("base_commit"), audit.get("base_commit")
     )
     _same("static audit HEAD", manifest.get("base_commit"), audit.get("head_commit"))
+    _same("modification base commit", manifest.get("base_commit"), modification.get("base_commit"))
     _same(
         "static audit candidate path",
         manifest.get("candidate_path"),
         audit.get("candidate_path"),
+    )
+    _same(
+        "modification candidate path",
+        manifest.get("candidate_path"),
+        modification.get("candidate_path"),
     )
     _same(
         "test audit static audit hash",
@@ -143,6 +163,7 @@ def record_candidate_outcome(
         "validation gate suite hash", suite_sha, gate.get("validation_suite_sha256")
     )
     for label, value in (
+        ("modification snapshot", modification.get("candidate_snapshot_sha256")),
         ("test audit snapshot", test_audit.get("candidate_snapshot_sha256")),
         ("validation suite snapshot", suite.get("candidate_snapshot_sha256")),
         ("validation gate snapshot", gate.get("candidate_snapshot_sha256")),
@@ -171,6 +192,8 @@ def record_candidate_outcome(
         ),
     ):
         _same(label, expected, actual)
+    if modification.get("status") != "modified":
+        raise ValueError("candidate modification must complete before outcome recording")
     if not audit.get("passed") or not test_audit.get("passed"):
         raise ValueError("candidate audits must pass before outcome recording")
     if gate.get("gate_level") != "promotion" or suite.get("gate_level") != "promotion":
@@ -215,6 +238,10 @@ def record_candidate_outcome(
         "modification_plan": {
             "path": str(Path(plan_path).resolve()),
             "sha256": plan_sha,
+        },
+        "candidate_modification": {
+            "path": str(Path(candidate_modification_path).resolve()),
+            "sha256": modification_sha,
         },
         "candidate_audit": {
             "path": str(Path(candidate_audit_path).resolve()),

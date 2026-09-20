@@ -112,6 +112,7 @@ def validate_modification_plan(
     cohort: Mapping[str, Any],
     hypotheses: Mapping[str, Any],
     memory_context: Mapping[str, Any] | None = None,
+    observed_source_reads: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     result = dict(_object(value, "modification_plan"))
     _exact(
@@ -254,6 +255,15 @@ def validate_modification_plan(
             raise ModificationPlanValidationError(f"{field}.risk.level is unsupported")
         unique_paths = sorted({item["path"] for item in source_refs})
         if decision == "proceed":
+            if observed_source_reads is not None:
+                inspected = {
+                    str(item.get("path") or "") for item in observed_source_reads
+                }
+                missing_inspection = sorted(set(unique_paths) - inspected)
+                if missing_inspection:
+                    raise ModificationPlanValidationError(
+                        f"{field} selected sources were not inspected: {missing_inspection}"
+                    )
             fingerprint = attempt_fingerprint(
                 allowed_paths=unique_paths,
                 required_behavior_delta=contract["required_behavior_delta"],

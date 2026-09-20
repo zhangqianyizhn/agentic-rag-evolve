@@ -16,6 +16,8 @@ def main() -> int:
     parser.add_argument("--cohort", type=Path, required=True)
     parser.add_argument("--hypotheses", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-root", type=Path, required=True)
+    parser.add_argument("--candidate-audit", type=Path)
     parser.add_argument("--memory-context", type=Path)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--max-output-tokens", type=int)
@@ -23,6 +25,8 @@ def main() -> int:
     parser.add_argument("--request-max-retries", type=int, default=3)
     parser.add_argument("--request-retry-base-seconds", type=float, default=15.0)
     parser.add_argument("--request-retry-max-seconds", type=float, default=120.0)
+    parser.add_argument("--max-rounds", type=int, default=12)
+    parser.add_argument("--max-tool-calls", type=int, default=12)
     args = parser.parse_args()
     report = run_modification_planning(
         cohort_path=args.cohort,
@@ -37,6 +41,10 @@ def main() -> int:
         ),
         max_output_tokens=args.max_output_tokens,
         memory_context_path=args.memory_context,
+        source_root=args.source_root,
+        candidate_audit_path=args.candidate_audit,
+        max_rounds=args.max_rounds,
+        max_tool_calls=args.max_tool_calls,
     )
     print(json.dumps(report.to_dict(), ensure_ascii=False))
     return 0 if report.status in {"ok", "no_plannable_hypotheses"} else 1

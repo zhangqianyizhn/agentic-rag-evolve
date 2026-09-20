@@ -1,15 +1,18 @@
 import copy
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 from agentic_rag_evolve.planning import (
     ModificationPlanValidationError,
+    PlanningSourceReader,
     build_planning_memory_context,
     run_modification_planning,
     validate_modification_plan,
 )
+from agentic_rag_evolve.evolution import candidate_snapshot_sha256
 
 
 class FakeModel:
@@ -108,7 +111,38 @@ def _plan(*, decision: str = "proceed") -> dict:
     }
 
 
+def _read_source_response(call_id: str = "read-1") -> dict:
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": "read_source",
+                                "arguments": json.dumps(
+                                    {
+                                        "path": "systems/deepread/DeepRead/agent/runner.py",
+                                        "start_line": 1,
+                                        "end_line": 80,
+                                    }
+                                ),
+                            },
+                        }
+                    ],
+                }
+            }
+        ]
+    }
+
+
 class ModificationPlanningTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.source_root = Path(__file__).resolve().parents[1]
+
     def test_validator_resolves_paths_from_source_refs(self) -> None:
         result = validate_modification_plan(
             _plan(), cohort=_cohort(), hypotheses=_hypotheses()
@@ -165,6 +199,17 @@ class ModificationPlanningTest(unittest.TestCase):
                 candidate, cohort=_cohort(), hypotheses=_hypotheses()
             )
 
+    def test_proceeding_plan_must_inspect_selected_source(self) -> None:
+        with self.assertRaisesRegex(
+            ModificationPlanValidationError, "were not inspected"
+        ):
+            validate_modification_plan(
+                _plan(),
+                cohort=_cohort(),
+                hypotheses=_hypotheses(),
+                observed_source_reads=[],
+            )
+
     def test_empty_hypothesis_set_skips_model(self) -> None:
         hypotheses = _hypotheses()
         hypotheses["status"] = "no_hypotheses"
@@ -199,6 +244,7 @@ class ModificationPlanningTest(unittest.TestCase):
         corrected = _plan()
         model = FakeModel(
             [
+                _read_source_response(),
                 {"choices": [{"message": {"content": json.dumps(invalid)}}]},
                 {"choices": [{"message": {"content": json.dumps(corrected)}}]},
             ]
@@ -216,19 +262,24 @@ class ModificationPlanningTest(unittest.TestCase):
                 hypotheses_path=hypotheses_path,
                 output_path=output_path,
                 model=model,
+                source_root=self.source_root,
             )
             candidate = json.loads((root / "plan.candidate.json").read_text())
             audit = json.loads((root / "plan.audit.json").read_text())
 
         self.assertEqual(report.status, "ok")
-        self.assertEqual(report.model_calls, 2)
+        self.assertEqual(report.model_calls, 3)
+        self.assertEqual(report.tool_calls, 1)
         self.assertEqual(candidate, invalid)
         self.assertEqual(audit["status"], "ok")
-        self.assertEqual(len(audit["events"]), 2)
+        self.assertEqual(len(audit["events"]), 4)
 
     def test_agent_receives_audited_memory_context(self) -> None:
         model = FakeModel(
-            [{"choices": [{"message": {"content": json.dumps(_plan())}}]}]
+            [
+                _read_source_response(),
+                {"choices": [{"message": {"content": json.dumps(_plan())}}]},
+            ]
         )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -251,6 +302,7 @@ class ModificationPlanningTest(unittest.TestCase):
                 output_path=output_path,
                 model=model,
                 memory_context_path=memory_path,
+                source_root=self.source_root,
             )
             audit = json.loads((root / "plan.audit.json").read_text())
 
@@ -259,6 +311,103 @@ class ModificationPlanningTest(unittest.TestCase):
         self.assertEqual(user_payload["planning_memory"], context)
         self.assertEqual(audit["memory_context"]["path"], str(memory_path.resolve()))
         self.assertEqual(len(audit["memory_context"]["sha256"]), 64)
+        self.assertEqual(audit["source_access"]["source_count"], 1)
+        self.assertEqual(
+            audit["source_access"]["revision"]["kind"],
+            "allowlisted_source_manifest",
+        )
+        self.assertEqual(
+            audit["source_access"]["inspected_sources"][0]["path"],
+            "systems/deepread/DeepRead/agent/runner.py",
+        )
+        self.assertEqual(
+            len(audit["source_access"]["inspected_sources"][0]["sha256"]), 64
+        )
+        tool_names = [
+            item["function"]["name"] for item in model.calls[0]["tools"]
+        ]
+        self.assertEqual(tool_names, ["list_sources", "read_source"])
+        self.assertNotIn("content", json.dumps(audit))
+
+    def test_source_reader_rejects_unreferenced_path_and_source_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "systems/deepread/DeepRead/agent/runner.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("def run_agent():\n    return 1\n", encoding="utf-8")
+            reader = PlanningSourceReader(
+                source_root=root,
+                cohort=_cohort(),
+                hypotheses=_hypotheses(),
+            )
+
+            with self.assertRaisesRegex(PermissionError, "not allowlisted"):
+                reader.read_source("systems/deepread/DeepRead/tool/search.py")
+            source.write_text("def run_agent():\n    return 2\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "changed after access"):
+                reader.read_source(
+                    "systems/deepread/DeepRead/agent/runner.py",
+                    start_line=1,
+                    end_line=2,
+                )
+
+    def test_candidate_audit_detects_changes_outside_source_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            container = Path(directory)
+            root = container / "candidate"
+            source = root / "systems/deepread/DeepRead/agent/runner.py"
+            source.parent.mkdir(parents=True)
+            source.write_text("def run_agent():\n    return 1\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.email", "test@example.com"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.name", "Test"], check=True
+            )
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-qm", "baseline"], check=True
+            )
+            head = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            source.write_text("def run_agent():\n    return 2\n", encoding="utf-8")
+            changed = ["systems/deepread/DeepRead/agent/runner.py"]
+            audit = {
+                "schema_version": "deepread-candidate-audit-v1",
+                "candidate_id": "candidate-1",
+                "candidate_path": str(root),
+                "head_commit": head,
+                "changed_paths": changed,
+                "candidate_snapshot_sha256": candidate_snapshot_sha256(
+                    root, head_commit=head, changed_paths=changed
+                ),
+                "passed": True,
+            }
+            audit_path = container / "audit.json"
+            audit_path.write_text(json.dumps(audit), encoding="utf-8")
+            reader = PlanningSourceReader(
+                source_root=root,
+                cohort=_cohort(),
+                hypotheses=_hypotheses(),
+                candidate_audit_path=audit_path,
+            )
+            self.assertEqual(reader.revision["kind"], "candidate_snapshot")
+            self.assertEqual(
+                reader.revision["snapshot_sha256"],
+                audit["candidate_snapshot_sha256"],
+            )
+            unscoped = root / "systems/deepread/DeepRead/tool/unscoped.py"
+            unscoped.parent.mkdir(parents=True)
+            unscoped.write_text("VALUE = 1\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "changed paths"):
+                reader.catalog()
 
 
 if __name__ == "__main__":

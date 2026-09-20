@@ -11,12 +11,14 @@ from .memory import (
 )
 from .plans import ModificationPlanReport, run_modification_planning
 from .plan_validator import ModificationPlanValidationError, validate_modification_plan
+from .source_access import PlanningSourceReader
 
 __all__ = [
     "HypothesisRunReport",
     "HypothesisValidationError",
     "ModificationPlanReport",
     "ModificationPlanValidationError",
+    "PlanningSourceReader",
     "build_hypothesis_cohort",
     "build_planning_memory_context",
     "build_preservation_memory",

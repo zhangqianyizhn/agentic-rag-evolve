@@ -14,6 +14,7 @@
 | validation gate 的 resolved 数量与成本报告 | development/promotion 两级逐题配对门禁 | DeepRead 显式限制平均指标、题级回退、运行异常和 token 成本；promotion 另需跨数据集 cohort。 |
 | promotion 后推进 `current_base_version`、写 accepted/rejected harness memory | outcome registry + materialization/baseline registry + repair/preservation memory | outcome 本身不改变 Git 或 baseline；accepted 只有登记为 baseline 后才产生 preservation memory，rejected 只按源码路径交集反馈可复核事实；sealed validation 不泄露题级反馈，也不沿用固定 defect/operator 分类。 |
 | validation regression feedback 重新进入 diagnosis | `deepread-regression-feedback-v1` 的 development-only 诊断权限 | 保留 HarnessFix 的再诊断闭环，但 holdout/cross-dataset 只给聚合统计；若没有 development 回退则不创建可诊断题目。 |
+| modify/planning agent 按需读取 harness 源码 | hypothesis-scope `list_sources` / `read_source` | 只开放 diagnosis 已引用的 DeepRead 文件；proceed 前强制真实读取，candidate 重试还需持续匹配 static-audit snapshot。 |
 | 整数 `current_base_version` + 版本目录 | 线性 baseline entry + internal Git ref | 当前版本由不可变账本末端推导；完整仓库 commit 保留 framework/runner/target 的一致组合。 |
 
 共同主线保持一致：冻结被测系统 → 运行 → 评测 → 诊断 → 聚合计划 → 隔离修改 → train/development 验证 → 晋升或拒绝。

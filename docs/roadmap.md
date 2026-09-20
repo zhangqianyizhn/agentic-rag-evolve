@@ -96,7 +96,8 @@
 - [x] 为 modification planner 提供 hypothesis-scope 源码读取，并在 candidate 模式复核完整 snapshot；
 - [x] 生成不复制大产物、不泄漏 validation task ID 的终态 iteration report；
 - [x] 建立 hash-chain 单轮账本，支持失败不推进、同阶段重试与 accepted/rejected 分支恢复；
-- 编排各阶段的自动执行器，并在真实小样本上完成全流程；
+- [x] 用冻结 runbook 自动执行/恢复各阶段，并将 stdout/stderr 摘要作为账本证据；
+- 在真实小样本上完成全流程；
 - [x] 在验证协议中拒绝 final test role，使其不参与 candidate 选择。
 
 完成条件：可以从 v0 自动完成一轮诊断、修改和候选晋升，并完整复现实验谱系。

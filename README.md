@@ -56,6 +56,7 @@ Markdown ingestion + 最小 DeepRead runtime + 隔离 gold label 的 DocumentQA 
 ```
 
 详细说明见 [系统架构](docs/architecture.md)和[实施路线](docs/roadmap.md)。
+单轮中断恢复与 runbook 格式见 [单轮编排](docs/iteration-orchestration.md)。
 
 ## 当前入口
 

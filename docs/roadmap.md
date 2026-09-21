@@ -99,6 +99,7 @@
 - [x] 用冻结 runbook 自动执行/恢复各阶段，并将 stdout/stderr 摘要作为账本证据；
 - [x] 支持诊断跳过、空 repair cohort 和无 candidate 的合法短路终态；
 - [x] 用真实 FinanceBench 单题验证 baseline、judge、trajectory、bundle 和 no-candidate 终态恢复（见 `docs/experiments/m6-full-flow-smoke-00517.md`）；
+- [x] 复筛历史 sample20 bad cases，并用真实诊断发现 evaluation convention mismatch 与工具循环（见 `docs/experiments/m6-current-model-badcase-screen.md`）；
 - 在真实小样本上完成全流程；
 - [x] 在验证协议中拒绝 final test role，使其不参与 candidate 选择。
 

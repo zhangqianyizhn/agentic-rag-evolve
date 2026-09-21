@@ -42,7 +42,7 @@ HarnessFix 的 GAIA diagnosis prompt 要求模型从预先枚举的 component、
 - `diagnosed` 必须同时提供最早干预点、支持证据、反驳证据、反事实和至少一个源码范围；
 - 未知字段、过长文本和过多 anchor 被拒绝。
 
-模型常见的嵌套 anchor 写法和 `kind=judge` 会先被规范化为稳定的扁平协议，再进行事实校验。校验失败会连同精确的扁平 anchor 形状返回模型，最多重试一次。诊断 HTTP 调用默认单次等待 1,800 秒；每轮请求对 429/5xx 最多额外重试 3 次，优先遵循 `Retry-After`，否则按 15、30、60 秒退避。重试发生在 provider 内，不会重启 agent 或重复已经完成的轮次；attempt 数和等待时间写入对应 model audit event。相较 HarnessFix 的 300 秒默认值，这适配了长思考模型的实测时延波动和共享账号并发限流。单次 payload 最多返回 12,000 字符、源码最多返回 240 行，越界请求会安全截断并告知 `has_more`。默认不限制总工具调用数或模型输出 token，只由 12 轮 agent 上限终止；两者仍可通过 CLI 显式设置。`audit.json` 将一次模型响应或工具调用各记录为一个事件；运行中通过原子替换逐轮 checkpoint，只保存请求字节数、耗时、finish reason、tool arguments、状态、token、验证错误和不含正文的候选结构摘要，不复制初始 bundle、源码内容或模型长文本。
+模型常见的嵌套 anchor 写法和 `kind=judge` 会先被规范化为稳定的扁平协议，再进行事实校验。校验失败会连同精确的扁平 anchor 形状返回模型，最多重试一次。诊断 HTTP 调用默认单次等待 1,800 秒；每轮请求对 429/5xx 最多额外重试 3 次，优先遵循 `Retry-After`，否则按 15、30、60 秒退避。重试发生在 provider 内，不会重启 agent 或重复已经完成的轮次；attempt 数和等待时间写入对应 model audit event。相较 HarnessFix 的 300 秒默认值，这适配了长思考模型的实测时延波动和共享账号并发限流。单次 payload 最多返回 12,000 字符、源码最多返回 240 行，越界请求会安全截断并告知 `has_more`。默认不限制总工具调用数或模型输出 token，调查阶段由 12 轮 agent 上限终止；两者仍可通过 CLI 显式设置。完全被既有读取覆盖的 payload 范围会被拒绝，避免模型反复读取同一小片段。调查轮次结束后，框架额外提供一次不暴露工具的最终提交机会；证据不足时应返回 `insufficient_evidence`，不能继续检索。`audit.json` 将一次模型响应或工具调用各记录为一个事件；运行中通过原子替换逐轮 checkpoint，只保存请求字节数、耗时、finish reason、tool arguments、状态、token、验证错误和不含正文的候选结构摘要，不复制初始 bundle、源码内容或模型长文本。
 
 ## 命令
 

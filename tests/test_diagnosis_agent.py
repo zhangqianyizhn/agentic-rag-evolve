@@ -469,6 +469,66 @@ class DiagnosisAgentTest(unittest.TestCase):
         self.assertEqual(model.calls, [])
         self.assertEqual(audit["route"]["target"], "evaluation_review")
 
+    def test_tool_round_budget_keeps_one_tool_free_finalization_call(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle_path = self._bundle(root)
+            insufficient = self._diagnosis()
+            insufficient.update(
+                status="insufficient_evidence",
+                earliest_intervention=None,
+                root_cause_hypothesis="The available evidence does not isolate a DeepRead defect.",
+                supporting_evidence=[],
+                contradicting_evidence=[],
+                counterfactual={
+                    "change": "Collect another comparable failure.",
+                    "expected_observation": "The same mechanism recurs.",
+                    "falsifier": "The error does not recur.",
+                },
+                affected_sources=[],
+                uncertainties=["The single trace is insufficient."],
+            )
+            model = FakeDiagnosisModel(
+                [
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "",
+                                    "tool_calls": [
+                                        {
+                                            "id": "list-1",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "list_sources",
+                                                "arguments": "{}",
+                                            },
+                                        }
+                                    ],
+                                }
+                            }
+                        ],
+                        "usage": {},
+                    },
+                    {
+                        "choices": [{"message": {"content": json.dumps(insufficient)}}],
+                        "usage": {},
+                    },
+                ]
+            )
+            report = run_diagnosis(
+                bundle_path=bundle_path,
+                source_root=self.source_root,
+                output_path=root / "output",
+                model=model,
+                max_rounds=1,
+            )
+
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.rounds, 2)
+        self.assertNotIn("tools", model.calls[1])
+        self.assertIn("budget is exhausted", model.calls[1]["messages"][-1]["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -306,7 +306,20 @@ def run_diagnosis(
     tool_call_count = 0
     validation_failures = 0
 
-    for round_number in range(1, max_rounds + 1):
+    for round_number in range(1, max_rounds + 2):
+        forced_finalization = round_number == max_rounds + 1
+        if forced_finalization:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "The investigation budget is exhausted. Do not call tools. Return the "
+                        "complete diagnosis JSON now, using only evidence already read. If the "
+                        "evidence is insufficient, return status=insufficient_evidence rather "
+                        "than continuing investigation."
+                    ),
+                }
+            )
         model_event: dict[str, Any] = {
             "kind": "model",
             "round": round_number,
@@ -323,11 +336,12 @@ def run_diagnosis(
         request_payload: dict[str, Any] = {
             "model": model.model_name,
             "messages": messages,
-            "tools": DIAGNOSIS_TOOLS,
-            "tool_choice": "auto",
             "temperature": 0.0,
             "stream": False,
         }
+        if not forced_finalization:
+            request_payload["tools"] = DIAGNOSIS_TOOLS
+            request_payload["tool_choice"] = "auto"
         if max_output_tokens is not None:
             request_payload["max_tokens"] = max_output_tokens
         request_started = time.monotonic()
@@ -421,6 +435,26 @@ def run_diagnosis(
                         raise RuntimeError(
                             "diagnosis tool budget exhausted; return the final JSON now"
                         )
+                    if name == "read_payload":
+                        path = str(arguments.get("path") or "")
+                        offset = int(arguments.get("offset_chars", 0))
+                        limit = int(arguments.get("limit_chars", 12_000))
+                        prior = [
+                            item for item in payload_reads if item.get("path") == path
+                        ]
+                        total_chars = (
+                            int(prior[0].get("total_chars") or offset + limit)
+                            if prior else offset + limit
+                        )
+                        requested_end = min(total_chars, offset + limit)
+                        if any(
+                            int(item.get("offset_chars") or 0) <= offset
+                            and int(item.get("end_chars") or 0) >= requested_end
+                            for item in prior
+                        ):
+                            raise RuntimeError(
+                                "payload range was already read; use the existing evidence and finalize"
+                            )
                     result = _execute_tool(reader, name, arguments)
                     ok = True
                     if name == "read_source":
@@ -515,7 +549,7 @@ def run_diagnosis(
     return DiagnosisRunReport(
         task_id,
         "max_rounds",
-        max_rounds,
+        max_rounds + 1,
         tool_call_count,
         validation_failures,
         None,

@@ -16,6 +16,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run the frozen DeepRead global baseline")
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--store", type=Path, required=True)
+    parser.add_argument(
+        "--store-manifest",
+        type=Path,
+        help="Verify and bind a STORE_MANIFEST.json produced by build_deepread_store",
+    )
+    parser.add_argument(
+        "--candidate-audit",
+        type=Path,
+        help="Bind this run to an audited candidate checkout",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
     parser.add_argument("--limit", type=int)
@@ -39,6 +49,8 @@ def main() -> int:
         ),
         limit=args.limit,
         task_ids=args.task_id,
+        store_manifest_path=args.store_manifest,
+        candidate_audit_path=args.candidate_audit,
     )
     print(json.dumps(summary, ensure_ascii=False))
     return 0 if not summary["failed"] else 1

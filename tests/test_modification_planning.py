@@ -155,6 +155,27 @@ class ModificationPlanningTest(unittest.TestCase):
         )
         self.assertEqual(item["edit_scope"]["max_files_to_modify"], 1)
         self.assertTrue(item["edit_scope"]["must_inspect_before_edit"])
+        self.assertFalse(item["edit_scope"]["requires_store_rebuild"])
+
+    def test_ingestion_source_is_evolvable_and_requires_store_rebuild(self) -> None:
+        cohort = _cohort()
+        cohort["eligible_diagnoses"][0]["affected_sources"][0].update(
+            path="systems/deepread/ingestion.py", symbol="MarkdownIngestor._ingest_one"
+        )
+        result = validate_modification_plan(
+            _plan(), cohort=cohort, hypotheses=_hypotheses()
+        )
+
+        scope = result["plans"][0]["edit_scope"]
+        self.assertEqual(scope["allowed_paths"], ["systems/deepread/ingestion.py"])
+        self.assertTrue(scope["requires_store_rebuild"])
+
+        reader = PlanningSourceReader(
+            source_root=self.source_root,
+            cohort=cohort,
+            hypotheses=_hypotheses(),
+        )
+        self.assertEqual(reader.catalog()[0]["path"], "systems/deepread/ingestion.py")
 
     def test_singleton_hypothesis_cannot_proceed(self) -> None:
         with self.assertRaisesRegex(

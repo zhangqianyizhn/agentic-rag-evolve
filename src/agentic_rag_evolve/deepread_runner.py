@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import inspect
 import time
 import uuid
 from dataclasses import asdict, dataclass
@@ -12,7 +13,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from agentic_rag_evolve.providers import ProviderBundle
+from agentic_rag_evolve.evolution.audit import verify_candidate_snapshot
 from systems.deepread.runtime import DeepReadConfig, GlobalDeepReadRuntime
+from agentic_rag_evolve.store_build import verify_store_manifest
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +71,8 @@ def run_financebench(
     config: DeepReadConfig,
     limit: int | None = None,
     task_ids: Sequence[str] | None = None,
+    store_manifest_path: Path | None = None,
+    candidate_audit_path: Path | None = None,
 ) -> dict[str, Any]:
     output_path = Path(output_path)
     if output_path.exists() and any(output_path.iterdir()):
@@ -90,6 +95,48 @@ def run_financebench(
         if limit < 1:
             raise ValueError("limit must be at least 1")
         queries = queries[:limit]
+
+    store_build = None
+    if store_manifest_path is not None:
+        store_manifest_path = Path(store_manifest_path).resolve()
+        store_build_value = verify_store_manifest(store_path, store_manifest_path)
+        store_build = {
+            "path": str(store_manifest_path),
+            "sha256": _sha256_file(store_manifest_path),
+            "candidate": store_build_value.get("candidate"),
+        }
+
+    candidate_source = None
+    if candidate_audit_path is not None:
+        candidate_audit_path = Path(candidate_audit_path).resolve()
+        audit_bytes = candidate_audit_path.read_bytes()
+        audit = json.loads(audit_bytes)
+        if audit.get("schema_version") != "deepread-candidate-audit-v1" or not audit.get("passed"):
+            raise ValueError("a passing candidate audit is required for a candidate run")
+        candidate_root = Path(str(audit.get("candidate_path") or "")).resolve()
+        verify_candidate_snapshot(candidate_root, audit)
+        loaded_runtime = Path(inspect.getfile(GlobalDeepReadRuntime)).resolve()
+        expected_runtime = (candidate_root / "systems/deepread/runtime.py").resolve()
+        if loaded_runtime != expected_runtime:
+            raise ValueError(
+                "loaded DeepRead runtime does not come from the audited candidate checkout"
+            )
+        candidate_source = {
+            "candidate_id": audit.get("candidate_id"),
+            "plan_id": audit.get("plan_id"),
+            "candidate_snapshot_sha256": audit.get("candidate_snapshot_sha256"),
+            "candidate_audit_path": str(candidate_audit_path),
+            "candidate_audit_sha256": hashlib.sha256(audit_bytes).hexdigest(),
+        }
+        store_candidate = (store_build or {}).get("candidate")
+        if store_candidate is not None and store_candidate.get(
+            "candidate_snapshot_sha256"
+        ) != candidate_source["candidate_snapshot_sha256"]:
+            raise ValueError("candidate store and runtime snapshots do not match")
+        if store_candidate is not None and store_candidate.get(
+            "candidate_audit_sha256"
+        ) != candidate_source["candidate_audit_sha256"]:
+            raise ValueError("candidate store and runtime audits do not match")
 
     created_at = datetime.now(timezone.utc)
     run_id = f"run_{created_at.strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
@@ -114,12 +161,15 @@ def run_financebench(
         "store_name": Path(store_path).name,
         "store_fingerprint": _store_fingerprint(store_path),
         "query_count": len(queries),
+        "task_ids": [query.task_id for query in queries],
         "config": asdict(config),
         "providers": {
             "chat": providers.chat.model_name,
             "embedding": providers.embedding.model_name,
             "reranker": providers.reranker.model_name if providers.reranker else None,
         },
+        "store_build": store_build,
+        "candidate_source": candidate_source,
     }
     (output_path / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -150,6 +200,7 @@ def run_financebench(
             except Exception as exc:
                 record = {
                     **asdict(query),
+                    "run_id": run_id,
                     "status": "error",
                     "error_type": type(exc).__name__,
                     "error": str(exc),

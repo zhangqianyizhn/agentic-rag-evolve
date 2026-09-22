@@ -25,6 +25,29 @@
 
 development 与其余验证 cohort 按 `(dataset, task_id)` 必须互斥。问题文本和 sample ID 也必须在 baseline/candidate 两侧一致。每个 cohort 还会冻结 baseline/candidate evaluation 文件的 SHA256，供下游反馈和编排重新核验。
 
+## 入库/索引候选
+
+当 modification plan 的范围包含 `systems/deepread/ingestion.py` 或 `DeepRead/index/markdown_parser.py` 时，框架机械生成 `requires_store_rebuild=true`。这类候选在固定测试之后会多出 `candidate_store` 编排阶段：
+
+```bash
+# 必须从 candidate worktree 运行，使导入的 ingestion/parser 就是候选源码
+uv run python -m runner.build_deepread_store \
+  --documents <documents.jsonl> \
+  --output <empty-candidate-store> \
+  --source-root <candidate-worktree> \
+  --candidate-audit <candidate-audit.json> \
+  --env-file <framework-repo>/.env
+
+uv run python -m runner.run_deepread \
+  --dataset <dataset.jsonl> \
+  --store <candidate-store> \
+  --store-manifest <candidate-store>/STORE_MANIFEST.json \
+  --candidate-audit <candidate-audit.json> \
+  --output <empty-candidate-run>
+```
+
+store manifest 冻结输入 Markdown、入库/parser 源码、embedding 模型和全部生成 artifact 的 SHA256。runner 会在查询前复核 artifact，并把 store build 与实际加载的 candidate runtime snapshot 写入 run manifest。validation suite 的每个 candidate cohort 必须提供 `candidate_run_manifest`；门禁核对任务覆盖、源码 snapshot、store snapshot 和 manifest hash。旧 store、由 baseline 代码生成的 store、审计后改变的 store，以及候选 runtime/store 来自不同 snapshot 的情况都会失败。普通在线行为修改不强制重建 store。
+
 ## 回退反馈边界
 
 `runner/build_regression_feedback.py` 将一个已经落盘的 validation gate 转成 `deepread-regression-feedback-v1`。它重新核对 gate、suite 和 static audit 的 SHA256、candidate/plan/snapshot ID，并把 candidate snapshot 作为下一轮诊断的源码版本。

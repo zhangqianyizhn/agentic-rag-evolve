@@ -35,7 +35,7 @@ class HypothesisRunReport:
 
 SYSTEM_PROMPT = """You aggregate grounded DeepRead diagnoses into falsifiable improvement hypotheses.
 
-Do not use a predefined defect taxonomy or repair operator. Group diagnoses only when their evidence supports the same underlying agent mechanism and one behavior change could plausibly affect them. Similar answer topics, datasets, or affected filenames alone are not a shared mechanism. Preserve counterevidence and uncertainty. Do not write code, a patch, or a detailed implementation plan.
+Do not use a predefined defect taxonomy or repair operator. Group diagnoses only when their evidence supports the same underlying agent mechanism and one behavior change could plausibly affect them. Similar answer topics, datasets, or affected filenames alone are not a shared mechanism. Keep stored-representation failures (Markdown parsing, chunk/hierarchy construction, embedding inputs, or index artifacts) distinct from online retrieval/tool-policy failures unless the diagnoses establish one shared causal mechanism. Preserve counterevidence and uncertainty. Do not write code, a patch, or a detailed implementation plan.
 
 Return only one JSON object with exactly these top-level fields:
 - schema_version="deepread-improvement-hypotheses-v1"

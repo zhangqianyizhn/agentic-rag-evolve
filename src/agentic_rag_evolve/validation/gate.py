@@ -80,8 +80,15 @@ def _ratio(current: int, baseline: int) -> float | None:
 
 
 def _pair_cohort(
-    spec: Mapping[str, Any], *, suite_root: Path, epsilon: float
+    spec: Mapping[str, Any],
+    *,
+    suite_root: Path,
+    epsilon: float,
+    requires_store_rebuild: bool,
+    candidate_snapshot_sha256: str,
+    candidate_audit_sha256: str,
 ) -> dict[str, Any]:
+    optional = {"candidate_run_manifest"} & set(spec)
     _exact(
         spec,
         {
@@ -89,7 +96,7 @@ def _pair_cohort(
             "candidate_evaluation", "task_ids", "primary_metric",
             "min_mean_delta", "min_improved", "max_regressions",
             "max_token_cost_ratio",
-        },
+        } | optional,
         "validation cohort",
     )
     name = str(spec.get("name") or "").strip()
@@ -109,6 +116,45 @@ def _pair_cohort(
         raise ValueError(f"validation cohort {name!r} task_ids must be non-empty and unique")
     baseline_path = _resolve(suite_root, spec.get("baseline_evaluation"))
     candidate_path = _resolve(suite_root, spec.get("candidate_evaluation"))
+    candidate_run_ref = None
+    if "candidate_run_manifest" in spec:
+        candidate_run_path = _resolve(suite_root, spec.get("candidate_run_manifest"))
+        candidate_run = _load_object(candidate_run_path, "candidate run manifest")
+        if candidate_run.get("schema_version") != 1:
+            raise ValueError("unsupported candidate run manifest schema")
+        missing_run_tasks = sorted(set(task_ids) - set(candidate_run.get("task_ids") or []))
+        if missing_run_tasks:
+            raise ValueError(
+                f"candidate run manifest is missing cohort tasks: {missing_run_tasks}"
+            )
+        candidate_source = candidate_run.get("candidate_source") or {}
+        if candidate_source.get("candidate_snapshot_sha256") != candidate_snapshot_sha256:
+            raise ValueError("candidate run source snapshot does not match candidate audit")
+        candidate_run_ref = {
+            "path": str(candidate_run_path),
+            "sha256": hashlib.sha256(candidate_run_path.read_bytes()).hexdigest(),
+            "store_build": candidate_run.get("store_build"),
+        }
+    if requires_store_rebuild:
+        if candidate_run_ref is None:
+            raise ValueError(
+                "ingestion/indexing candidate validation requires candidate_run_manifest"
+            )
+        store_build = candidate_run_ref.get("store_build") or {}
+        store_candidate = store_build.get("candidate") or {}
+        if store_candidate.get("candidate_snapshot_sha256") != candidate_snapshot_sha256:
+            raise ValueError(
+                "candidate run did not use a store rebuilt from the audited candidate snapshot"
+            )
+        if store_candidate.get("candidate_audit_sha256") != candidate_audit_sha256:
+            raise ValueError(
+                "candidate store was not built from the current candidate audit"
+            )
+        store_manifest_path = Path(str(store_build.get("path") or ""))
+        if not store_manifest_path.is_file() or hashlib.sha256(
+            store_manifest_path.read_bytes()
+        ).hexdigest() != store_build.get("sha256"):
+            raise ValueError("candidate store manifest is missing or changed after the run")
     baseline = _load_evaluation(baseline_path)
     candidate = _load_evaluation(candidate_path)
     missing_baseline = sorted(set(task_ids) - set(baseline))
@@ -118,6 +164,12 @@ def _pair_cohort(
             f"validation cohort {name!r} is missing tasks; "
             f"baseline={missing_baseline}, candidate={missing_candidate}"
         )
+    if candidate_run_ref is not None:
+        run_id = candidate_run.get("run_id")
+        if not run_id or any(candidate[task_id].get("run_id") != run_id for task_id in task_ids):
+            raise ValueError(
+                "candidate evaluation is not bound to the declared candidate run"
+            )
 
     pairs = []
     improved = []
@@ -212,6 +264,7 @@ def _pair_cohort(
         "candidate_evaluation_sha256": hashlib.sha256(
             candidate_path.read_bytes()
         ).hexdigest(),
+        "candidate_run_manifest": candidate_run_ref,
     }
 
 
@@ -277,6 +330,10 @@ def evaluate_validation_gate(
     ]
     if len(plans) != 1 or plans[0].get("decision") != "proceed":
         raise ValueError("validation suite requires one proceeding plan")
+    selected_plan = plans[0]
+    requires_store_rebuild = bool(
+        (selected_plan.get("edit_scope") or {}).get("requires_store_rebuild")
+    )
 
     epsilon = float(suite.get("comparison_epsilon", 1e-9))
     if not math.isfinite(epsilon) or epsilon < 0:
@@ -291,7 +348,14 @@ def evaluate_validation_gate(
     if len(names) != len(set(names)):
         raise ValueError("validation suite cohort names must be unique")
     cohorts = [
-        _pair_cohort(item, suite_root=suite_path.parent, epsilon=epsilon)
+        _pair_cohort(
+            item,
+            suite_root=suite_path.parent,
+            epsilon=epsilon,
+            requires_store_rebuild=requires_store_rebuild,
+            candidate_snapshot_sha256=str(audit.get("candidate_snapshot_sha256") or ""),
+            candidate_audit_sha256=candidate_audit_sha256,
+        )
         for item in cohort_specs
     ]
     roles = {item["role"] for item in cohorts}
@@ -332,6 +396,7 @@ def evaluate_validation_gate(
         "candidate_test_audit_sha256": hashlib.sha256(
             Path(candidate_test_audit_path).read_bytes()
         ).hexdigest(),
+        "requires_store_rebuild": requires_store_rebuild,
         "passed": not failures,
         "failed_cohorts": failures,
         "cohorts": cohorts,

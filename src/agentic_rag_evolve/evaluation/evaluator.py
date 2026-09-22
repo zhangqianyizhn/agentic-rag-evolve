@@ -153,6 +153,7 @@ def evaluate_financebench(
 
         details.append({
             "task_id": task_id,
+            "run_id": prediction.get("run_id"),
             "source_index": prediction.get("source_index"),
             "sample_id": reference.metadata.get("sample_id"),
             "question": question,

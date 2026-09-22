@@ -21,6 +21,8 @@ BASE_STEPS = (
     "candidate_modified",
     "static_audit",
     "fixed_tests",
+    # ``candidate_store`` is inserted here only for plans whose mechanically
+    # derived edit scope requires rebuilding ingestion/index artifacts.
     "validation_gate",
     "outcome",
 )
@@ -36,6 +38,7 @@ STEP_SCHEMAS = {
     "candidate_modified": "deepread-candidate-modification-v1",
     "static_audit": "deepread-candidate-audit-v1",
     "fixed_tests": "deepread-candidate-test-audit-v1",
+    "candidate_store": "deepread-store-build-v1",
     "validation_gate": "deepread-validation-gate-v1",
     "outcome": "deepread-candidate-outcome-v1",
     "materialization": "deepread-candidate-materialization-v1",
@@ -90,15 +93,21 @@ def _event_files(root: Path) -> list[Path]:
     return sorted((root / "events").glob("*.json"))
 
 
-def _expected_sequence(outcome: str | None) -> tuple[str, ...]:
+def _expected_sequence(
+    outcome: str | None, *, requires_store_rebuild: bool = False
+) -> tuple[str, ...]:
+    base = BASE_STEPS
+    if requires_store_rebuild:
+        validation_index = base.index("validation_gate")
+        base = base[:validation_index] + ("candidate_store",) + base[validation_index:]
     if outcome == "accepted":
-        return BASE_STEPS + ACCEPTED_TAIL
+        return base + ACCEPTED_TAIL
     if outcome == "rejected":
-        return BASE_STEPS + REJECTED_TAIL
+        return base + REJECTED_TAIL
     if outcome == "no_candidate":
-        plan_index = BASE_STEPS.index("modification_plan")
-        return BASE_STEPS[: plan_index + 1] + NO_CANDIDATE_TAIL
-    return BASE_STEPS
+        plan_index = base.index("modification_plan")
+        return base[: plan_index + 1] + NO_CANDIDATE_TAIL
+    return base
 
 
 def _read_and_verify(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
@@ -108,6 +117,7 @@ def _read_and_verify(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], 
     previous = _sha_bytes(manifest_bytes)
     events: list[dict[str, Any]] = []
     outcome: str | None = None
+    requires_store_rebuild = False
     completed: list[str] = []
     for index, path in enumerate(_event_files(root), 1):
         if path.name != f"{index:04d}.json":
@@ -125,7 +135,9 @@ def _read_and_verify(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], 
             if _sha_bytes(artifact_path.read_bytes()) != reference.get("sha256"):
                 raise ValueError(f"iteration artifact changed after recording: {artifact_path}")
         if event.get("status") == "completed":
-            expected = _expected_sequence(outcome)[len(completed)]
+            expected = _expected_sequence(
+                outcome, requires_store_rebuild=requires_store_rebuild
+            )[len(completed)]
             if event.get("step") != expected:
                 raise ValueError(f"unexpected completed iteration step: {event.get('step')}")
             completed.append(expected)
@@ -138,6 +150,12 @@ def _read_and_verify(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], 
                 ]
                 if not proceeding:
                     outcome = "no_candidate"
+                elif len(proceeding) == 1:
+                    requires_store_rebuild = bool(
+                        (proceeding[0].get("edit_scope") or {}).get(
+                            "requires_store_rebuild"
+                        )
+                    )
             if expected == "outcome":
                 primary = (event.get("artifacts") or {}).get("primary") or {}
                 value, _ = _read_object(Path(str(primary.get("path") or "")), "candidate outcome")
@@ -153,7 +171,23 @@ def read_iteration_status(*, root: Path) -> dict[str, Any]:
     root = Path(root).resolve()
     manifest, events, outcome = _read_and_verify(root)
     completed = [event["step"] for event in events if event.get("status") == "completed"]
-    sequence = _expected_sequence(outcome)
+    requires_store_rebuild = False
+    for event in events:
+        if event.get("status") != "completed" or event.get("step") != "modification_plan":
+            continue
+        primary = (event.get("artifacts") or {}).get("primary") or {}
+        value, _ = _read_object(Path(str(primary.get("path") or "")), "modification plan")
+        proceeding = [
+            item for item in value.get("plans") or []
+            if isinstance(item, Mapping) and item.get("decision") == "proceed"
+        ]
+        requires_store_rebuild = bool(
+            len(proceeding) == 1
+            and (proceeding[0].get("edit_scope") or {}).get("requires_store_rebuild")
+        )
+    sequence = _expected_sequence(
+        outcome, requires_store_rebuild=requires_store_rebuild
+    )
     next_step = sequence[len(completed)] if len(completed) < len(sequence) else None
     return {
         "schema_version": "deepread-iteration-status-v1",

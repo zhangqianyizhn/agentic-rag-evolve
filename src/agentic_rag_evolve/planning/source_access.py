@@ -14,7 +14,14 @@ from agentic_rag_evolve.evolution import (
 )
 
 
-EVOLVABLE_ROOT = "systems/deepread/DeepRead/"
+EVOLVABLE_ROOTS = (
+    "systems/deepread/DeepRead/",
+    "systems/deepread/ingestion.py",
+)
+
+
+def _is_evolvable_source(path: str) -> bool:
+    return any(path == root or path.startswith(root) for root in EVOLVABLE_ROOTS)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -103,7 +110,7 @@ class PlanningSourceReader:
                     raise ValueError("hypothesis references an unknown affected source")
                 source = sources[index]
                 path = str(source.get("path") or "")
-                if not path.startswith(EVOLVABLE_ROOT):
+                if not _is_evolvable_source(path):
                     raise PermissionError(
                         f"planning source is outside evolvable DeepRead root: {path}"
                     )

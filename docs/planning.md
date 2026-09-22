@@ -49,7 +49,7 @@ python runner/run_hypothesis_aggregation.py \
 
 `runner/run_modification_planning.py` 将 hypothesis 转换为修改契约，但不创建 candidate、不能读取未引用源码，也不执行编辑。与 HarnessFix 从 operator registry 推导 allowed paths 不同，DeepRead plan 只能选择 hypothesis 的 `affected_source_refs`；validator 再从原 diagnosis cohort 解析真实 path 与 symbol，模型不能直接提供文件路径。
 
-planner 通过框架提供的 `list_sources` 和 `read_source` 按需理解实现。源码目录不会直接暴露为通用文件系统能力：source catalog 只包含当前 hypotheses 已引用、且位于 `systems/deepread/DeepRead/` 下的文件，每次最多返回 240 行和 30,000 字符。`proceed` plan 选择的每个文件都必须在本轮真实读取过，仅读取目录或直接猜测实现会被 validator 拒绝；`defer` 不要求无意义地读取源码。
+planner 通过框架提供的 `list_sources` 和 `read_source` 按需理解实现。源码目录不会直接暴露为通用文件系统能力：source catalog 只包含当前 hypotheses 已引用、且位于 `systems/deepread/DeepRead/` 或 active `systems/deepread/ingestion.py` 下的文件，每次最多返回 240 行和 30,000 字符。`proceed` plan 选择的每个文件都必须在本轮真实读取过，仅读取目录或直接猜测实现会被 validator 拒绝；`defer` 不要求无意义地读取源码。
 
 读取器在启动时冻结 allowlisted 文件 SHA256，并在每次工具调用和最终落盘前复核，因此 planning 过程中源码变化会产生 `source_changed`，不会输出 plan。若 `--candidate-audit` 存在，还会重新核验 candidate HEAD、完整 changed-path 集合和 candidate snapshot SHA256；这可以发现发生在 source catalog 之外的新增或修改。audit 只保存 revision、读取文件的 path/SHA256 和工具调用元数据，不复制源码内容。
 
@@ -61,6 +61,7 @@ planner 通过框架提供的 `list_sources` 和 `read_source` 按需理解实�
 - 必须声明 preserved behavior、non-goals、holdout selection、expected observations、rollback conditions 与 regression scenarios；
 - framework、runner、provider、benchmark、tests、docs 和 `.env` 固定为 forbidden roots；
 - 输出自动计算 `max_files_to_modify`，并要求 modify agent 编辑前先检查全部 allowed sources。
+- 若范围包含 active ingestion 或 Markdown parser，输出自动标记 `requires_store_rebuild=true`；该字段不是模型决定，不能通过提示词省略重建。
 
 无 hypothesis 时确定性输出 `no_plannable_hypotheses`，模型调用和 token 均为零。真实调用同样产生独立 audit 与失败 candidate。
 

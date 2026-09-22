@@ -70,6 +70,30 @@ def candidate_snapshot_sha256(
     return hashlib.sha256(encoded).hexdigest()
 
 
+def verify_candidate_snapshot(
+    candidate_path: Path,
+    audit: Mapping[str, Any],
+    command_runner: CommandRunner = _run,
+) -> str:
+    """Recompute and verify the live worktree state frozen by a static audit."""
+
+    candidate_path = Path(candidate_path).resolve()
+    head = command_runner(
+        ["git", "-C", str(candidate_path), "rev-parse", "HEAD"]
+    ).stdout.strip()
+    changed_paths = collect_changed_paths(candidate_path, command_runner)
+    snapshot = candidate_snapshot_sha256(
+        candidate_path, head_commit=head, changed_paths=changed_paths
+    )
+    if head != audit.get("head_commit"):
+        raise ValueError("candidate HEAD changed after static audit")
+    if changed_paths != sorted(audit.get("changed_paths") or []):
+        raise ValueError("candidate changed paths differ from static audit")
+    if snapshot != audit.get("candidate_snapshot_sha256"):
+        raise ValueError("candidate snapshot changed after static audit")
+    return snapshot
+
+
 def _under(path: str, roots: Sequence[str]) -> bool:
     return any(
         path == root.rstrip("/") or path.startswith(root.rstrip("/") + "/")

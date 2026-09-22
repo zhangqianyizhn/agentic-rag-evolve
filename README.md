@@ -62,6 +62,7 @@ Markdown ingestion + 最小 DeepRead runtime + 隔离 gold label 的 DocumentQA 
 
 ```bash
 uv run python runner/validate_reference.py --store <store_index> --run <historical_run>
+uv run python -m runner.build_deepread_store --documents <documents.jsonl> --output <empty_store_dir> --source-root .
 uv run python runner/run_deepread.py --dataset <dataset.jsonl> --store <store_index> --output <empty_run_dir>
 uv run python runner/evaluate_deepread.py --dataset <dataset.jsonl> --predictions <predictions.jsonl> --output <empty_eval_dir> --judge
 uv run python runner/compile_trajectory.py --trace <deepread_trace.jsonl> --predictions <predictions.jsonl> --output <empty_trajectory_dir>
@@ -69,5 +70,7 @@ uv run python runner/build_diagnostic_bundle.py --trajectory <trajectory.json> -
 uv run python runner/build_bad_case_report.py --bundle <bundle_dir> --output <empty_report_dir>
 uv run python runner/run_diagnosis.py --bundle <bundle.json> --source-root . --output <empty_diagnosis_dir>
 ```
+
+`documents.jsonl` 每行包含 `document_id`、Markdown `path` 和可选 `metadata`。若候选修改了 ingestion/Markdown parser，应在 candidate worktree 中执行 store builder，并同时传入 `--candidate-audit`；候选运行再传入同一个 audit 以及新 store 内的 `--store-manifest`。validation gate 会拒绝复用旧 store 或混用 candidate snapshot。
 
 模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)，事件与轨迹协议见 [DeepRead trajectory](docs/trajectory.md)，诊断 triage 见 [确定性失败信号](docs/failure-signals.md)，诊断输出与引用门禁见 [证据锚定诊断协议](docs/diagnosis.md)，行为门禁与回退再诊断边界见 [validation](docs/validation.md)，候选终态与固化见 [outcome registry](docs/outcome-registry.md)和[materialization](docs/materialization.md)，失败反馈见 [repair memory](docs/repair-memory.md)，演化基线见 [baseline registry](docs/baseline-registry.md)，轮次汇总见 [iteration report](docs/iteration-report.md)。

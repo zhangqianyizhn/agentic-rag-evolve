@@ -17,6 +17,20 @@ FORBIDDEN_ROOTS = [
     "tests/",
 ]
 
+EVOLVABLE_ROOTS = (
+    "systems/deepread/DeepRead/",
+    "systems/deepread/ingestion.py",
+)
+
+STORE_BUILD_PATHS = {
+    "systems/deepread/DeepRead/index/markdown_parser.py",
+    "systems/deepread/ingestion.py",
+}
+
+
+def _is_evolvable_source(path: str) -> bool:
+    return any(path == root or path.startswith(root) for root in EVOLVABLE_ROOTS)
+
 
 class ModificationPlanValidationError(ValueError):
     """A modification plan exceeds its hypothesis or validation boundary."""
@@ -93,7 +107,7 @@ def _resolve_source_ref(
         raise ModificationPlanValidationError(f"{field} references unknown source")
     source = sources[index]
     path = _text(source.get("path"), f"{field}.resolved.path", 300)
-    if not path.startswith("systems/deepread/DeepRead/"):
+    if not _is_evolvable_source(path):
         raise ModificationPlanValidationError(
             f"{field} resolves outside the evolvable DeepRead root"
         )
@@ -285,6 +299,9 @@ def validate_modification_plan(
                     "max_files_to_modify": len(unique_paths),
                     "forbidden_roots": list(FORBIDDEN_ROOTS),
                     "must_inspect_before_edit": True,
+                    "requires_store_rebuild": bool(
+                        set(unique_paths) & STORE_BUILD_PATHS
+                    ),
                 },
                 "change_contract": contract,
                 "validation_plan": validation,

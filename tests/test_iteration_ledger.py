@@ -16,7 +16,13 @@ from agentic_rag_evolve.orchestration.ledger import (
 )
 
 
-def _artifact(root: Path, step: str, *, outcome: str | None = None) -> Path:
+def _artifact(
+    root: Path,
+    step: str,
+    *,
+    outcome: str | None = None,
+    requires_store_rebuild: bool = False,
+) -> Path:
     schema = STEP_SCHEMAS.get(step, f"test-{step}-v1")
     if step == "terminal_memory":
         schema = (
@@ -26,7 +32,12 @@ def _artifact(root: Path, step: str, *, outcome: str | None = None) -> Path:
         )
     value = {"schema_version": schema, "step": step}
     if step == "modification_plan":
-        value["plans"] = [{"decision": "proceed"}]
+        value["plans"] = [
+            {
+                "decision": "proceed",
+                "edit_scope": {"requires_store_rebuild": requires_store_rebuild},
+            }
+        ]
     if step == "outcome":
         value["outcome"] = outcome
     path = root / f"{step}.json"
@@ -145,6 +156,32 @@ class IterationLedgerTest(unittest.TestCase):
 
         self.assertEqual(status["outcome"], "no_candidate")
         self.assertEqual(status["next_step"], "iteration_report")
+
+    def test_ingestion_plan_inserts_candidate_store_before_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "ledger"
+            self._init(root)
+            through_tests = BASE_STEPS[: BASE_STEPS.index("fixed_tests") + 1]
+            for step in through_tests:
+                append_iteration_event(
+                    root=root,
+                    step=step,
+                    status="completed",
+                    artifacts={
+                        "primary": _artifact(
+                            base, step, requires_store_rebuild=True
+                        )
+                    },
+                )
+            self.assertEqual(read_iteration_status(root=root)["next_step"], "candidate_store")
+            append_iteration_event(
+                root=root,
+                step="candidate_store",
+                status="completed",
+                artifacts={"primary": _artifact(base, "candidate_store")},
+            )
+            self.assertEqual(read_iteration_status(root=root)["next_step"], "validation_gate")
 
     def test_artifact_tampering_breaks_resume(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

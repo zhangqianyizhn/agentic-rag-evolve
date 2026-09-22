@@ -90,10 +90,14 @@ def execute_iteration(
             or any(not isinstance(item, str) or not item for item in command)
         ):
             raise ValueError(f"runbook command for {step} must be a non-empty argv list")
+        raw_cwd = specification.get("cwd")
+        command_cwd = base if raw_cwd is None else Path(str(raw_cwd)).resolve()
+        if not command_cwd.is_dir():
+            raise ValueError(f"runbook cwd for {step} is not a directory: {command_cwd}")
         attempt = status["event_count"] + 1
         command_error = None
         try:
-            result = command_runner(command, cwd=base)
+            result = command_runner(command, cwd=command_cwd)
         except Exception as exc:
             command_error = f"{type(exc).__name__}: {exc}"
             result = subprocess.CompletedProcess(command, 1, stdout="", stderr=command_error)
@@ -106,6 +110,7 @@ def execute_iteration(
                     "schema_version": "deepread-iteration-command-log-v1",
                     "step": step,
                     "command": command,
+                    "cwd": str(command_cwd),
                     "returncode": result.returncode,
                     "stdout_tail": (result.stdout or "")[-20_000:],
                     "stderr_tail": (result.stderr or "")[-20_000:],

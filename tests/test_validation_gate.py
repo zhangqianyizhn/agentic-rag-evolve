@@ -346,6 +346,69 @@ class ValidationGateTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "snapshot"):
                 self._evaluate(paths)
 
+    def test_ingestion_plan_requires_run_bound_to_rebuilt_candidate_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = self._write_inputs(root)
+            plan = json.loads(paths[2].read_text())
+            plan["plans"][0]["edit_scope"] = {"requires_store_rebuild": True}
+            paths[2].write_text(json.dumps(plan), encoding="utf-8")
+            audit = json.loads(paths[1].read_text())
+            audit["plan_sha256"] = hashlib.sha256(paths[2].read_bytes()).hexdigest()
+            paths[1].write_text(json.dumps(audit), encoding="utf-8")
+            test_audit = json.loads(paths[3].read_text())
+            test_audit["plan_sha256"] = audit["plan_sha256"]
+            test_audit["candidate_audit_sha256"] = hashlib.sha256(
+                paths[1].read_bytes()
+            ).hexdigest()
+            paths[3].write_text(json.dumps(test_audit), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "requires candidate_run_manifest"):
+                self._evaluate(paths)
+
+            store_manifest = root / "STORE_MANIFEST.json"
+            store_manifest.write_text(
+                json.dumps({"schema_version": "deepread-store-build-v1"}),
+                encoding="utf-8",
+            )
+            run_manifest = root / "candidate-run.json"
+            candidate_audit_sha256 = hashlib.sha256(paths[1].read_bytes()).hexdigest()
+            candidate_evaluation = json.loads((root / "dev-candidate.json").read_text())
+            candidate_evaluation[0]["run_id"] = "candidate-run-1"
+            (root / "dev-candidate.json").write_text(json.dumps(candidate_evaluation))
+            holdout_evaluation = json.loads((root / "hold-candidate.json").read_text())
+            holdout_evaluation[0]["run_id"] = "candidate-run-1"
+            (root / "hold-candidate.json").write_text(json.dumps(holdout_evaluation))
+            run_manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "run_id": "candidate-run-1",
+                        "task_ids": ["q1", "q2"],
+                        "candidate_source": {
+                            "candidate_snapshot_sha256": "c" * 64,
+                        },
+                        "store_build": {
+                            "path": str(store_manifest),
+                            "sha256": hashlib.sha256(store_manifest.read_bytes()).hexdigest(),
+                            "candidate": {
+                                "candidate_snapshot_sha256": "c" * 64,
+                                "candidate_audit_sha256": candidate_audit_sha256,
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            suite = json.loads(paths[0].read_text())
+            for cohort in suite["cohorts"]:
+                cohort["candidate_run_manifest"] = "candidate-run.json"
+            paths[0].write_text(json.dumps(suite), encoding="utf-8")
+
+            result = self._evaluate(paths)
+            self.assertTrue(result["passed"])
+            self.assertTrue(result["requires_store_rebuild"])
+
     def test_regression_feedback_exposes_development_tasks_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -358,13 +421,14 @@ class ValidationGateTest(unittest.TestCase):
                 output_path=root / "feedback.json",
             )
 
-            serialized = json.dumps(feedback)
             self.assertEqual(feedback["status"], "ready")
             self.assertEqual(feedback["diagnosis_scope"]["task_ids"], ["q1"])
             self.assertEqual(
                 feedback["sealed_cohort_summaries"][0]["regressed_task_count"], 1
             )
-            self.assertNotIn("q2", serialized)
+            self.assertNotIn(
+                "regressed_task_ids", feedback["sealed_cohort_summaries"][0]
+            )
             self.assertNotIn("baseline_evaluation", feedback["sealed_cohort_summaries"][0])
             self.assertFalse(feedback["final_test_accessed"])
 

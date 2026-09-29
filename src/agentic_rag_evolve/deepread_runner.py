@@ -10,7 +10,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from agentic_rag_evolve.providers import ProviderBundle
 from agentic_rag_evolve.evolution.audit import verify_candidate_snapshot
@@ -73,6 +73,7 @@ def run_financebench(
     task_ids: Sequence[str] | None = None,
     store_manifest_path: Path | None = None,
     candidate_audit_path: Path | None = None,
+    progress_callback: Callable[[int, int, QueryInput, str], None] | None = None,
 ) -> dict[str, Any]:
     output_path = Path(output_path)
     if output_path.exists() and any(output_path.iterdir()):
@@ -178,7 +179,7 @@ def run_financebench(
     prediction_path = output_path / "predictions.jsonl"
     completed = 0
     with prediction_path.open("x", encoding="utf-8") as predictions:
-        for query in queries:
+        for query_index, query in enumerate(queries, start=1):
             started = time.perf_counter()
             try:
                 result = runtime.query(query.question, task_id=query.task_id)
@@ -208,6 +209,10 @@ def run_financebench(
                 }
             predictions.write(json.dumps(record, ensure_ascii=False) + "\n")
             predictions.flush()
+            if progress_callback is not None:
+                progress_callback(
+                    query_index, len(queries), query, str(record.get("status") or "unknown")
+                )
 
     summary = {"query_count": len(queries), "completed": completed, "failed": len(queries) - completed}
     (output_path / "summary.json").write_text(

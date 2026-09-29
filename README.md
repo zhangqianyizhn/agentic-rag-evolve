@@ -61,6 +61,7 @@ Markdown ingestion + 最小 DeepRead runtime + 隔离 gold label 的 DocumentQA 
 ## 当前入口
 
 ```bash
+uv run python runner/run_experiment.py --help
 uv run python runner/validate_reference.py --store <store_index> --run <historical_run>
 uv run python -m runner.build_deepread_store --documents <documents.jsonl> --output <empty_store_dir> --source-root .
 uv run python runner/run_deepread.py --dataset <dataset.jsonl> --store <store_index> --output <empty_run_dir>
@@ -70,6 +71,8 @@ uv run python runner/build_diagnostic_bundle.py --trajectory <trajectory.json> -
 uv run python runner/build_bad_case_report.py --bundle <bundle_dir> --output <empty_report_dir>
 uv run python runner/run_diagnosis.py --bundle <bundle.json> --source-root . --output <empty_diagnosis_dir>
 ```
+
+正式服务器实验优先使用 `runner/run_experiment.py`，它会串行执行并校验各阶段，支持以完全相同参数加 `--resume` 恢复。`baseline` 模式运行到 trajectory，`diagnose` 模式继续运行诊断、hypothesis 和 modification planning。服务器示例及 candidate 边界见 [统一实验入口](docs/experiment-runner.md)。其余 CLI 保留为可测试、可单独恢复的底层阶段接口。
 
 `documents.jsonl` 每行包含 `document_id`、Markdown `path` 和可选 `metadata`。若候选修改了 ingestion/Markdown parser，应在 candidate worktree 中执行 store builder，并同时传入 `--candidate-audit`；候选运行再传入同一个 audit 以及新 store 内的 `--store-manifest`。validation gate 会拒绝复用旧 store 或混用 candidate snapshot。
 

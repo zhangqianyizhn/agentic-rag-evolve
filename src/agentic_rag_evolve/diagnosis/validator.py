@@ -1,4 +1,4 @@
-"""Strict validation for open-ended, evidence-anchored DeepRead diagnoses."""
+"""Grounded validation and safe normalization for open-ended diagnoses."""
 
 from __future__ import annotations
 
@@ -44,6 +44,16 @@ def _string_list(value: Any, field: str, *, maximum: int = 8) -> Sequence[Any]:
     """Normalize one model-produced string without weakening item validation."""
 
     if isinstance(value, str):
+        value = [value]
+    return _list(value, field, maximum=maximum)
+
+
+def _evidence_list(value: Any, field: str, *, maximum: int = 8) -> Sequence[Any]:
+    """Accept a single claim/anchor and normalize it to the stored list form."""
+
+    if value is None:
+        value = []
+    elif isinstance(value, (str, Mapping)):
         value = [value]
     return _list(value, field, maximum=maximum)
 
@@ -227,6 +237,11 @@ def _validate_anchor(
     observed_payload_reads: Sequence[Mapping[str, Any]] | None,
     field: str,
 ) -> dict[str, Any]:
+    if isinstance(value, str):
+        return {
+            "kind": "note",
+            "claim": _text(value, f"{field}.claim", maximum=1_000),
+        }
     anchor = dict(_object(value, field))
     kind = str(anchor.get("kind") or "")
     nested_kinds = ("trajectory", "coverage", "evaluation", "source", "payload")
@@ -263,6 +278,7 @@ def _validate_anchor(
         "evaluation": {"kind", "claim", "field"},
         "source": {"kind", "claim", "quote", "path", "start_line", "end_line"},
         "payload": {"kind", "claim", "quote", "path", "offset_chars", "end_chars"},
+        "note": {"kind", "claim"},
     }
     if kind not in allowed:
         raise DiagnosisValidationError(f"{field}.kind is unsupported: {kind!r}")
@@ -299,11 +315,33 @@ def _validate_anchor(
             bundle=bundle,
             observed_source_reads=observed_source_reads,
             field=field,
-            require_quote=True,
+            require_quote=False,
         )
+        if anchor.get("quote") is not None:
+            quote = _text(anchor.get("quote"), f"{field}.quote", maximum=500)
+            if observed_source_reads is not None:
+                _validate_quote(
+                    quote,
+                    _observed_excerpt(
+                        path=str(anchor["path"]),
+                        start=int(anchor["start_line"]),
+                        end=int(anchor["end_line"]),
+                        observed_reads=observed_source_reads,
+                        start_field="start_line",
+                        end_field="end_line",
+                        line_range=True,
+                    ),
+                    field,
+                )
+    elif kind == "note":
+        pass
     else:
         path = _text(anchor.get("path"), f"{field}.path", maximum=300)
-        quote = _text(anchor.get("quote"), f"{field}.quote", maximum=500)
+        quote = (
+            _text(anchor.get("quote"), f"{field}.quote", maximum=500)
+            if anchor.get("quote") is not None
+            else None
+        )
         manifest = _manifest(bundle, "payload")
         if path not in manifest:
             raise DiagnosisValidationError(f"{field} references unknown payload {path!r}")
@@ -323,7 +361,7 @@ def _validate_anchor(
             end_field="end_chars",
         ):
             raise DiagnosisValidationError(f"{field} cites payload content not read by the agent")
-        if observed_payload_reads is not None:
+        if observed_payload_reads is not None and quote is not None:
             _validate_quote(
                 quote,
                 _observed_excerpt(
@@ -389,7 +427,7 @@ def validate_diagnosis(
         raise DiagnosisValidationError("diagnosed result requires earliest_intervention")
 
     for list_name in ("supporting_evidence", "contradicting_evidence"):
-        items = _list(diagnosis.get(list_name), list_name)
+        items = _evidence_list(diagnosis.get(list_name), list_name)
         if status == "diagnosed" and not items:
             raise DiagnosisValidationError(f"diagnosed result requires {list_name}")
         diagnosis[list_name] = [
@@ -402,17 +440,36 @@ def validate_diagnosis(
             )
             for index, item in enumerate(items)
         ]
+    if status == "diagnosed" and not any(
+        item.get("kind") != "note" for item in diagnosis["supporting_evidence"]
+    ):
+        raise DiagnosisValidationError(
+            "diagnosed result requires at least one grounded supporting evidence anchor"
+        )
 
-    counterfactual = dict(_object(diagnosis.get("counterfactual"), "counterfactual"))
-    _exact_fields(
-        counterfactual,
-        {"change", "expected_observation", "falsifier"},
-        "counterfactual",
+    raw_counterfactual = diagnosis.get("counterfactual")
+    if isinstance(raw_counterfactual, str):
+        counterfactual = {
+            "change": _text(raw_counterfactual, "counterfactual", maximum=1_500)
+        }
+    elif raw_counterfactual is None:
+        counterfactual = {}
+    else:
+        counterfactual = dict(_object(raw_counterfactual, "counterfactual"))
+        _exact_fields(
+            counterfactual,
+            {"change", "expected_observation", "falsifier"},
+            "counterfactual",
+        )
+        for field, item in counterfactual.items():
+            _text(item, f"counterfactual.{field}", maximum=700)
+    if status == "diagnosed" and not counterfactual:
+        raise DiagnosisValidationError("diagnosed result requires a counterfactual")
+    diagnosis["counterfactual"] = counterfactual
+
+    affected = _list(
+        diagnosis.get("affected_sources") or [], "affected_sources", maximum=6
     )
-    for field in ("change", "expected_observation", "falsifier"):
-        _text(counterfactual.get(field), f"counterfactual.{field}", maximum=700)
-
-    affected = _list(diagnosis.get("affected_sources"), "affected_sources", maximum=6)
     if status == "diagnosed" and not affected:
         raise DiagnosisValidationError("diagnosed result requires affected_sources")
     for index, item in enumerate(affected):
@@ -432,7 +489,7 @@ def validate_diagnosis(
         )
 
     uncertainties = _string_list(
-        diagnosis.get("uncertainties"), "uncertainties", maximum=8
+        diagnosis.get("uncertainties") or [], "uncertainties", maximum=8
     )
     diagnosis["uncertainties"] = [
         _text(item, f"uncertainties[{index}]", maximum=500)

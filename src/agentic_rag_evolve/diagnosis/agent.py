@@ -84,21 +84,28 @@ DIAGNOSIS_TOOLS = [
 ]
 
 
-ANCHOR_CONTRACT = """Evidence anchors are flat JSON objects with exactly one of these shapes:
+ANCHOR_CONTRACT = """Grounded evidence anchors are flat JSON objects with one of these shapes:
 {"kind":"trajectory","claim":"...","turn":1,"tool_call_id":"... or omit"}
 {"kind":"coverage","claim":"...","evidence_index":0,"layer":"corpus|candidate|read|answer"}
 {"kind":"evaluation","claim":"...","field":"judge.score"}
-{"kind":"source","claim":"...","quote":"exact text inside the cited lines","path":"...","start_line":1,"end_line":20}
-{"kind":"payload","claim":"...","quote":"exact text inside the cited characters","path":"...","offset_chars":0,"end_chars":100}
-Never nest a trajectory, coverage, evaluation, source, payload, or judge object inside an anchor. Judge facts use kind="evaluation" and a field such as "judge.score"."""
+{"kind":"source","claim":"...","path":"...","start_line":1,"end_line":20,"quote":"optional exact text"}
+{"kind":"payload","claim":"...","path":"...","offset_chars":0,"end_chars":100,"quote":"optional exact text"}
+Evidence lists may also contain a concise plain string for a qualitative caveat or competing interpretation. A diagnosed result must still include at least one grounded supporting anchor. Never nest a trajectory, coverage, evaluation, source, payload, or judge object inside an anchor. Judge facts use kind="evaluation" and a field such as "judge.score"."""
+
+
+OUTPUT_CONTRACT = """Always include: schema_version="deepread-diagnosis-v1"; task_id copied from the input; status (diagnosed, not_agent_failure, or insufficient_evidence); failure_manifestation; and root_cause_hypothesis.
+For status=diagnosed also include: earliest_intervention, supporting_evidence, contradicting_evidence, counterfactual, and affected_sources.
+For status=not_agent_failure or insufficient_evidence, those fields may be null or empty when they do not apply.
+supporting_evidence and contradicting_evidence normally use JSON arrays, but a single string or anchor is accepted and normalized. counterfactual may be one concise string or an object with any of change, expected_observation, and falsifier. uncertainties may be omitted, a string, or an array of strings."""
 
 
 SYSTEM_PROMPT = """You diagnose an evolvable DeepRead document-QA system from a validated bundle.
 
 Use only facts in the bundle and content returned by the provided tools. Do not invent source code, tool results, line numbers, or a fixed defect category. Separate observable manifestation from root-cause hypothesis. Find the earliest behavior that could have changed the outcome, not merely the last wrong answer. Inspect the smallest relevant source range before returning status=diagnosed; normally one source file is enough. Treat Markdown parsing, chunk/hierarchy construction, embedding-input selection, and index artifacts as DeepRead behavior, but inspect indexing or ingestion code only when corpus/candidate coverage or the observed coordinates specifically implicate the stored representation. Do not attribute an online retrieval miss to ingestion merely because both precede the answer. Include evidence that challenges your hypothesis and a falsifiable counterfactual. Stop exploring once the diagnosis is supported and return the JSON. Do not write a patch or choose a repair operator.
 
-Return only one JSON object with exactly these fields:
-schema_version="deepread-diagnosis-v1"; task_id; status (diagnosed, not_agent_failure, or insufficient_evidence); failure_manifestation; earliest_intervention ({turn, tool_call_id or null, rationale} or null); root_cause_hypothesis; supporting_evidence; contradicting_evidence; counterfactual ({change, expected_observation, falsifier}); affected_sources; uncertainties.
+Return only one JSON object. Do not add fields outside this contract.
+
+""" + OUTPUT_CONTRACT + """
 
 """ + ANCHOR_CONTRACT + """
 
@@ -248,7 +255,7 @@ def run_diagnosis(
     output_path: Path,
     model: DiagnosisModel,
     max_rounds: int = 12,
-    max_validation_failures: int = 1,
+    max_validation_failures: int = 3,
     max_tool_calls: int | None = None,
     max_output_tokens: int | None = None,
 ) -> DiagnosisRunReport:
@@ -305,9 +312,10 @@ def run_diagnosis(
     payload_reads: list[Mapping[str, Any]] = []
     tool_call_count = 0
     validation_failures = 0
+    repair_pending = False
 
-    for round_number in range(1, max_rounds + 2):
-        forced_finalization = round_number == max_rounds + 1
+    for round_number in range(1, max_rounds + max_validation_failures + 2):
+        forced_finalization = round_number > max_rounds and not repair_pending
         if forced_finalization:
             messages.append(
                 {
@@ -320,9 +328,18 @@ def run_diagnosis(
                     ),
                 }
             )
+        repair_only = repair_pending
+        repair_pending = False
         model_event: dict[str, Any] = {
             "kind": "model",
             "round": round_number,
+            "mode": (
+                "repair"
+                if repair_only
+                else "finalization"
+                if forced_finalization
+                else "investigation"
+            ),
             "status": "pending",
             "message_count": len(messages),
             "request_bytes": len(
@@ -339,7 +356,7 @@ def run_diagnosis(
             "temperature": 0.0,
             "stream": False,
         }
-        if not forced_finalization:
+        if not forced_finalization and not repair_only:
             request_payload["tools"] = DIAGNOSIS_TOOLS
             request_payload["tool_choice"] = "auto"
         if max_output_tokens is not None:
@@ -518,13 +535,17 @@ def run_diagnosis(
                     None,
                     audit_path.name,
                 )
+            repair_pending = True
             messages.append(
                 {
                     "role": "user",
                     "content": (
-                        f"Your diagnosis failed validation: {exc}. Correct the cited facts "
-                        "or use the tools, then return the complete JSON object again.\n\n"
-                        f"{ANCHOR_CONTRACT}"
+                        f"Your diagnosis failed validation: {exc}. This is a format-repair "
+                        "turn: do not call tools and do not restart the investigation. Return "
+                        "the complete corrected JSON object using only evidence already read. "
+                        "Preserve the diagnosis meaning and fix only the invalid structure or "
+                        "citation.\n\n"
+                        f"{OUTPUT_CONTRACT}\n\n{ANCHOR_CONTRACT}"
                     ),
                 }
             )

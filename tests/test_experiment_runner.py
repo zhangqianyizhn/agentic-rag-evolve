@@ -1,8 +1,10 @@
+import hashlib
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
+from agentic_rag_evolve.diagnostics.policy import DIAGNOSTIC_SOURCE_POLICY
 from agentic_rag_evolve.orchestration.experiment import (
     BASELINE_STAGES,
     DIAGNOSIS_STAGES,
@@ -57,6 +59,34 @@ class ExperimentRunnerTest(unittest.TestCase):
             judge=judge,
         )
 
+    def _write_frozen_bundle(self, config: ExperimentConfig) -> None:
+        bundle_root = config.output / "diagnostic_bundles" / "q1"
+        bundle_root.mkdir(parents=True)
+        sources = []
+        for spec in DIAGNOSTIC_SOURCE_POLICY:
+            path = config.source_root / spec.path
+            data = path.read_bytes()
+            sources.append({
+                "path": spec.path,
+                "component": spec.component,
+                "purpose": spec.purpose,
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "bytes": len(data),
+                "line_count": len(data.decode("utf-8").splitlines()),
+            })
+        bundle = bundle_root / "bundle.json"
+        bundle.write_text(json.dumps({
+            "schema_version": "deepread-diagnostic-input-v1",
+            "task": {"task_id": "q1"},
+            "trajectory": {"turns": []},
+            "access": {"sources": sources, "payloads": []},
+        }))
+        index = config.output / "diagnostic_bundles" / "index.json"
+        index.write_text(json.dumps({
+            "schema_version": "deepread-diagnostic-bundle-index-v1",
+            "items": [{"task_id": "q1", "bundle": str(bundle)}],
+        }))
+
     def test_modes_have_explicit_stage_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             baseline = self._config(Path(directory))
@@ -107,6 +137,41 @@ class ExperimentRunnerTest(unittest.TestCase):
             resumed = ExperimentCheckpoint(config, resume=True)
             with self.assertRaisesRegex(ValueError, "artifact changed"):
                 resumed.run("preflight", action)
+
+    def test_checkpoint_allows_framework_revision_change_after_sources_are_frozen(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self._config(root, mode="diagnose")
+            checkpoint = ExperimentCheckpoint(config, resume=False)
+            self._write_frozen_bundle(config)
+            checkpoint.state["stages"]["diagnostic_bundles"] = {"status": "completed"}
+            checkpoint._save()
+            manifest = json.loads(checkpoint.manifest_path.read_text())
+            manifest["inputs"]["source_revision"] = "0" * 40
+            checkpoint.manifest_path.write_text(json.dumps(manifest))
+
+            resumed = ExperimentCheckpoint(config, resume=True)
+
+        self.assertEqual(resumed.state["stages"]["diagnostic_bundles"]["status"], "completed")
+
+    def test_checkpoint_rejects_revision_change_when_frozen_deepread_source_differs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self._config(root, mode="diagnose")
+            checkpoint = ExperimentCheckpoint(config, resume=False)
+            self._write_frozen_bundle(config)
+            checkpoint.state["stages"]["diagnostic_bundles"] = {"status": "completed"}
+            checkpoint._save()
+            manifest = json.loads(checkpoint.manifest_path.read_text())
+            manifest["inputs"]["source_revision"] = "0" * 40
+            checkpoint.manifest_path.write_text(json.dumps(manifest))
+            bundle_path = config.output / "diagnostic_bundles" / "q1" / "bundle.json"
+            bundle = json.loads(bundle_path.read_text())
+            bundle["access"]["sources"][0]["sha256"] = "f" * 64
+            bundle_path.write_text(json.dumps(bundle))
+
+            with self.assertRaisesRegex(ValueError, "source changed since bundle creation"):
+                ExperimentCheckpoint(config, resume=True)
 
     def test_preflight_validates_document_coverage_without_recording_secrets(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

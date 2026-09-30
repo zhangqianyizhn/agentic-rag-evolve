@@ -15,7 +15,10 @@ from agentic_rag_evolve.deepread_runner import (
     run_financebench,
 )
 from agentic_rag_evolve.diagnosis import run_diagnosis
-from agentic_rag_evolve.diagnostics import build_diagnostic_bundle
+from agentic_rag_evolve.diagnostics import (
+    DiagnosticArtifactReader,
+    build_diagnostic_bundle,
+)
 from agentic_rag_evolve.evaluation.evaluator import (
     evaluate_financebench,
     write_evaluation,
@@ -111,6 +114,48 @@ def _git_revision(source_root: Path) -> str:
     if len(revision) != 40:
         raise ValueError("source_root does not resolve to a Git commit")
     return revision
+
+
+def _verify_frozen_diagnostic_sources(output: Path, source_root: Path) -> None:
+    """Verify the current DeepRead edit surface against an existing bundle snapshot."""
+
+    index_path = Path(output) / "diagnostic_bundles" / "index.json"
+    index = _read_json(index_path)
+    items = list(index.get("items") or [])
+    if not items:
+        raise ValueError("completed diagnostic bundle stage has no bundle items")
+    reader = DiagnosticArtifactReader(
+        bundle_path=Path(str(items[0]["bundle"])), source_root=source_root
+    )
+    for source in reader.list_sources():
+        reader.read_source(str(source["path"]), start_line=1, end_line=1)
+
+
+def _resume_manifest_compatible(
+    *,
+    stored: Mapping[str, Any],
+    current: Mapping[str, Any],
+    state: Mapping[str, Any],
+    config: "ExperimentConfig",
+) -> bool:
+    """Allow framework-only updates after diagnostic inputs have been frozen."""
+
+    stored_copy = json.loads(json.dumps(stored))
+    current_copy = json.loads(json.dumps(current))
+    stored_inputs = stored_copy.get("inputs") or {}
+    current_inputs = current_copy.get("inputs") or {}
+    stored_revision = stored_inputs.get("source_revision")
+    current_revision = current_inputs.get("source_revision")
+    if stored_revision == current_revision:
+        return stored_copy == current_copy
+    stored_inputs["source_revision"] = current_revision
+    if stored_copy != current_copy:
+        return False
+    bundle_stage = (state.get("stages") or {}).get("diagnostic_bundles") or {}
+    if config.mode != "diagnose" or bundle_stage.get("status") != "completed":
+        return False
+    _verify_frozen_diagnostic_sources(config.output, config.source_root)
+    return True
 
 
 def _document_manifest(path: Path) -> tuple[dict[str, Any], ...]:
@@ -217,9 +262,15 @@ class ExperimentCheckpoint:
                 )
             if not self.manifest_path.is_file() or not self.state_path.is_file():
                 raise ValueError("cannot resume an output without experiment checkpoint files")
-            if _read_json(self.manifest_path) != manifest:
-                raise ValueError("experiment configuration or frozen inputs changed since start")
+            stored_manifest = _read_json(self.manifest_path)
             self.state = _read_json(self.state_path)
+            if not _resume_manifest_compatible(
+                stored=stored_manifest,
+                current=manifest,
+                state=self.state,
+                config=config,
+            ):
+                raise ValueError("experiment configuration or frozen inputs changed since start")
             if self.state.get("schema_version") != STATE_SCHEMA:
                 raise ValueError("unsupported experiment state schema")
         else:

@@ -321,6 +321,8 @@ class DiagnosisAgentTest(unittest.TestCase):
         self.assertEqual(report.status, "ok")
         correction = model.calls[1]["messages"][-1]["content"]
         self.assertIn('Judge facts use kind="evaluation"', correction)
+        self.assertNotIn("tools", model.calls[1])
+        self.assertEqual(audit["events"][1]["mode"], "repair")
         self.assertEqual(
             audit["events"][0]["candidate_shape"]["supporting_evidence"],
             [{"kind": "unsupported", "fields": ["claim", "kind"]}],
@@ -359,6 +361,113 @@ class DiagnosisAgentTest(unittest.TestCase):
         )
         self.assertEqual(
             normalized["contradicting_evidence"][0]["field"], "judge.reasoning"
+        )
+
+    def test_validator_normalizes_freeform_counterevidence_and_counterfactual(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = json.loads(self._bundle(Path(directory)).read_text())
+        diagnosis = self._diagnosis()
+        diagnosis.update(
+            status="not_agent_failure",
+            earliest_intervention=None,
+            supporting_evidence={
+                "kind": "evaluation",
+                "claim": "The judge marked the answer incorrect.",
+                "field": "judge.score",
+            },
+            contradicting_evidence="The available evidence also supports an evaluator mismatch.",
+            counterfactual="Re-evaluate the answer under the documented metric convention.",
+            affected_sources=[],
+        )
+        diagnosis.pop("uncertainties")
+
+        normalized = validate_diagnosis(diagnosis, bundle=bundle)
+
+        self.assertEqual(normalized["contradicting_evidence"], [{
+            "kind": "note",
+            "claim": "The available evidence also supports an evaluator mismatch.",
+        }])
+        self.assertEqual(
+            normalized["counterfactual"],
+            {"change": "Re-evaluate the answer under the documented metric convention."},
+        )
+        self.assertEqual(normalized["uncertainties"], [])
+
+    def test_validator_allows_read_payload_anchor_without_redundant_quote(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = json.loads(self._bundle(Path(directory)).read_text())
+        bundle["access"]["payloads"] = [
+            {"path": "payloads/read.json", "bytes": 100}
+        ]
+        diagnosis = self._diagnosis()
+        diagnosis.update(
+            status="not_agent_failure",
+            earliest_intervention=None,
+            supporting_evidence=[{
+                "kind": "payload",
+                "claim": "The relevant value was present in the read payload.",
+                "path": "payloads/read.json",
+                "offset_chars": 0,
+                "end_chars": 20,
+            }],
+            contradicting_evidence=[],
+            affected_sources=[],
+        )
+
+        normalized = validate_diagnosis(
+            diagnosis,
+            bundle=bundle,
+            observed_payload_reads=[{
+                "path": "payloads/read.json",
+                "offset_chars": 0,
+                "end_chars": 100,
+                "content": "x" * 100,
+            }],
+        )
+
+        self.assertNotIn("quote", normalized["supporting_evidence"][0])
+
+    def test_agent_gets_multiple_tool_free_schema_repairs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle_path = self._bundle(root)
+            corrected = self._diagnosis()
+            corrected.update(
+                status="not_agent_failure",
+                earliest_intervention=None,
+                supporting_evidence=[{
+                    "kind": "evaluation",
+                    "claim": "The judge marked the answer incorrect.",
+                    "field": "judge.score",
+                }],
+                contradicting_evidence=[],
+                affected_sources=[],
+            )
+            invalid_one = copy.deepcopy(corrected)
+            invalid_one["supporting_evidence"][0]["kind"] = "unsupported"
+            invalid_two = copy.deepcopy(corrected)
+            invalid_two["supporting_evidence"][0]["field"] = "judge.missing"
+            model = FakeDiagnosisModel([
+                {"choices": [{"message": {"content": json.dumps(invalid_one)}}]},
+                {"choices": [{"message": {"content": json.dumps(invalid_two)}}]},
+                {"choices": [{"message": {"content": json.dumps(corrected)}}]},
+            ])
+
+            report = run_diagnosis(
+                bundle_path=bundle_path,
+                source_root=self.source_root,
+                output_path=root / "output",
+                model=model,
+            )
+            audit = json.loads((root / "output" / "audit.json").read_text())
+
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.validation_failures, 2)
+        self.assertNotIn("tools", model.calls[1])
+        self.assertNotIn("tools", model.calls[2])
+        self.assertEqual(
+            [event["mode"] for event in audit["events"] if event["kind"] == "model"],
+            ["investigation", "repair", "repair"],
         )
 
     def test_validator_normalizes_single_uncertainty_string(self) -> None:

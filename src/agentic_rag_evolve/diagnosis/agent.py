@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import time
 from dataclasses import asdict, dataclass
@@ -93,10 +94,15 @@ ANCHOR_CONTRACT = """Grounded evidence anchors are flat JSON objects with one of
 Evidence lists may also contain a concise plain string for a qualitative caveat or competing interpretation. A diagnosed result must still include at least one grounded supporting anchor. Never nest a trajectory, coverage, evaluation, source, payload, or judge object inside an anchor. Judge facts use kind="evaluation" and a field such as "judge.score"."""
 
 
-OUTPUT_CONTRACT = """Always include: schema_version="deepread-diagnosis-v1"; task_id copied from the input; status (diagnosed, not_agent_failure, or insufficient_evidence); failure_manifestation; and root_cause_hypothesis.
+OUTPUT_CONTRACT = """Always include: schema_version="deepread-diagnosis-v1"; task_id copied from the input; status (diagnosed, not_agent_failure, or insufficient_evidence); failure_manifestation; and root_cause_hypothesis. Each of the last two fields is a string of at most 1500 characters.
 For status=diagnosed also include: earliest_intervention, supporting_evidence, contradicting_evidence, counterfactual, and affected_sources.
+earliest_intervention is exactly {"turn":1,"tool_call_id":"optional existing call ID","rationale":"why this is the earliest intervention, at most 600 characters"}. turn is a DeepRead trajectory round, not a diagnosis-agent round. Omit tool_call_id when referring to the model behavior rather than a specific tool. Do not put action/change/expected_observation/falsifier here; those belong in counterfactual.
 For status=not_agent_failure or insufficient_evidence, those fields may be null or empty when they do not apply.
-supporting_evidence and contradicting_evidence normally use JSON arrays, but a single string or anchor is accepted and normalized. counterfactual may be one concise string or an object with any of change, expected_observation, and falsifier. uncertainties may be omitted, a string, or an array of strings."""
+supporting_evidence and contradicting_evidence each contain at most 8 items; each anchor claim or plain-string note has at most 500 characters. A diagnosed result requires at least one grounded supporting anchor and at least one contradicting item (a caveat may be a plain string).
+counterfactual may be a string of at most 1500 characters or an object with only change, expected_observation, and falsifier; each object value has at most 700 characters.
+affected_sources contains at most 6 objects, each exactly {"path":"allowlisted source path, at most 300 characters","start_line":1,"end_line":20,"symbol":"at most 160 characters","rationale":"at most 600 characters"}. A diagnosed result requires at least one source range actually read.
+uncertainties may be omitted, a string, or an array of at most 8 strings of at most 500 characters each; insufficient_evidence requires at least one uncertainty.
+Anchor paths have at most 300 characters, evaluation field paths at most 120, and optional exact quotes at most 500. Keep only the strongest evidence anchors rather than exceeding the list limits."""
 
 
 SYSTEM_PROMPT = """You diagnose an evolvable DeepRead document-QA system from a validated bundle.
@@ -248,6 +254,48 @@ def _candidate_shape(value: Mapping[str, Any]) -> dict[str, Any]:
     return shape
 
 
+def _restore_failed_attempt(
+    reader: DiagnosticArtifactReader, recovery_path: Path, audit: dict[str, Any]
+) -> tuple[dict[str, Any], list[Mapping[str, Any]], list[Mapping[str, Any]], str]:
+    """Re-read only previously observed ranges before a tool-free output repair."""
+
+    recovery_path = Path(recovery_path).resolve()
+    audit_path = recovery_path / "audit.json"
+    candidate_path = recovery_path / "candidate.json"
+    prior = json.loads(audit_path.read_text(encoding="utf-8"))
+    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+    if (
+        prior.get("schema_version") != "deepread-diagnosis-audit-v1"
+        or prior.get("status") not in {"validation_error", "error", "interrupted", "running"}
+        or prior.get("task_id") != audit["task_id"]
+        or not isinstance(candidate, Mapping)
+        or candidate.get("task_id") != audit["task_id"]
+    ):
+        raise ValueError("recovery attempt does not match this failed diagnosis")
+    bundle_hash = hashlib.sha256(reader.bundle_path.read_bytes()).hexdigest()
+    if prior.get("bundle_sha256") not in {None, bundle_hash}:
+        raise ValueError("recovery attempt diagnostic bundle changed")
+    source_reads: list[Mapping[str, Any]] = []
+    payload_reads: list[Mapping[str, Any]] = []
+    for event in prior.get("events") or []:
+        name = event.get("name")
+        if event.get("kind") != "tool" or not event.get("ok"):
+            continue
+        if name not in {"read_source", "read_payload"}:
+            continue
+        result = _execute_tool(reader, name, event["arguments"])
+        (source_reads if name == "read_source" else payload_reads).append(result)
+        audit["events"].append({**event, "restored": True})
+    audit["recovery"] = {
+        "attempt": str(recovery_path),
+        "audit_sha256": hashlib.sha256(audit_path.read_bytes()).hexdigest(),
+        "candidate_sha256": hashlib.sha256(candidate_path.read_bytes()).hexdigest(),
+        "source_read_count": len(source_reads),
+        "payload_read_count": len(payload_reads),
+    }
+    return dict(candidate), source_reads, payload_reads, str(prior.get("error") or "invalid output")
+
+
 def run_diagnosis(
     *,
     bundle_path: Path,
@@ -258,6 +306,7 @@ def run_diagnosis(
     max_validation_failures: int = 3,
     max_tool_calls: int | None = None,
     max_output_tokens: int | None = None,
+    recovery_path: Path | None = None,
 ) -> DiagnosisRunReport:
     """Run one diagnosis with restricted artifact tools and grounded output validation."""
 
@@ -283,6 +332,7 @@ def run_diagnosis(
     audit: dict[str, Any] = {
         "schema_version": "deepread-diagnosis-audit-v1",
         "task_id": task_id,
+        "bundle_sha256": hashlib.sha256(Path(bundle_path).read_bytes()).hexdigest(),
         "model": model.model_name,
         "route": dict(route),
         "events": [],
@@ -313,6 +363,32 @@ def run_diagnosis(
     tool_call_count = 0
     validation_failures = 0
     repair_pending = False
+    if recovery_path is not None:
+        candidate, source_reads, payload_reads, error = _restore_failed_attempt(
+            reader, recovery_path, audit
+        )
+        messages.extend([
+            {
+                "role": "user",
+                "content": json.dumps({
+                    "previously_read_sources": source_reads,
+                    "previously_read_payloads": payload_reads,
+                }, ensure_ascii=False),
+            },
+            {"role": "assistant", "content": json.dumps(candidate, ensure_ascii=False)},
+            {
+                "role": "user",
+                "content": (
+                    f"The saved diagnosis failed validation: {error}. Repair the complete "
+                    "JSON using the explicit contract below and only the restored evidence. "
+                    "Do not call tools or restart the investigation. Preserve the diagnosis "
+                    "meaning; shorten or combine claims to meet limits, and correct structure "
+                    f"and citations.\n\n{OUTPUT_CONTRACT}\n\n{ANCHOR_CONTRACT}"
+                ),
+            },
+        ])
+        repair_pending = True
+        _write_json(audit_path, audit)
 
     for round_number in range(1, max_rounds + max_validation_failures + 2):
         forced_finalization = round_number > max_rounds and not repair_pending
@@ -448,6 +524,8 @@ def run_diagnosis(
                 arguments: dict[str, Any] = {}
                 try:
                     name, arguments = _tool_arguments(call)
+                    if repair_only or forced_finalization:
+                        raise RuntimeError("tool calls are unavailable during output repair/finalization")
                     if max_tool_calls is not None and tool_call_count > max_tool_calls:
                         raise RuntimeError(
                             "diagnosis tool budget exhausted; return the final JSON now"

@@ -54,7 +54,7 @@ uv run --frozen python runner/run_experiment.py \
 --resume
 ```
 
-恢复时会重新核对 dataset/documents 哈希及所有已完成 artifact。若尚未冻结 diagnostic bundles，Git revision 变化仍会拒绝恢复；bundles 已完成后，允许只更新进化框架本身，并逐个校验 bundle 中冻结的 DeepRead 可见源码哈希。这样可以修复 diagnosis/orchestration 代码后继续实验，同时仍禁止把变化后的 DeepRead 实现与旧 baseline 混跑。diagnosis 失败会保留原 attempt；恢复时创建下一 attempt，不覆盖诊断审计记录。
+恢复时会重新核对 dataset/documents 哈希及所有已完成 artifact。若尚未冻结 diagnostic bundles，Git revision 变化仍会拒绝恢复；bundles 已完成后，允许只更新进化框架本身，并逐个校验 bundle 中冻结的 DeepRead 可见源码哈希。这样可以修复 diagnosis/orchestration 代码后继续实验，同时仍禁止把变化后的 DeepRead 实现与旧 baseline 混跑。diagnosis 失败会保留原 attempt；恢复时创建下一 attempt，不覆盖诊断审计记录。已有可解析 candidate 时，恢复其成功读取的证据并直接进行无工具格式修复，无需重跑调查；恢复读取仍核对 bundle/source/payload 哈希，成功诊断和 skipped 题继续复用。
 
 ## 产物
 

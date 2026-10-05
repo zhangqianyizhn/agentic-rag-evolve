@@ -3,6 +3,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from agentic_rag_evolve.diagnostics.policy import DIAGNOSTIC_SOURCE_POLICY
 from agentic_rag_evolve.orchestration.experiment import (
@@ -11,6 +13,7 @@ from agentic_rag_evolve.orchestration.experiment import (
     ExperimentCheckpoint,
     ExperimentConfig,
     _completed_diagnosis,
+    _diagnoses,
     _preflight,
 )
 
@@ -200,6 +203,32 @@ class ExperimentRunnerTest(unittest.TestCase):
             result = _completed_diagnosis(root)
 
         self.assertEqual(result, ("skipped", audit, None))
+
+    def test_experiment_reuses_failed_candidate_for_output_repair(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self._config(root, mode="diagnose")
+            self._write_frozen_bundle(config)
+            previous = config.output / "diagnoses/q1/attempt-0001"
+            previous.mkdir(parents=True)
+            (previous / "audit.json").write_text(json.dumps({"status": "validation_error"}))
+            (previous / "candidate.json").write_text("{}")
+
+            def complete(**kwargs):
+                output = kwargs["output_path"]
+                output.mkdir()
+                (output / "audit.json").write_text(json.dumps({"status": "skipped"}))
+                return SimpleNamespace(status="skipped")
+
+            with patch("agentic_rag_evolve.orchestration.experiment.load_chat_model"), patch(
+                "agentic_rag_evolve.orchestration.experiment.run_diagnosis", side_effect=complete
+            ) as run:
+                _, details = _diagnoses(config)
+                self.assertEqual(run.call_args.kwargs["recovery_path"], previous)
+                self.assertEqual(run.call_args.kwargs["output_path"].name, "attempt-0002")
+                self.assertEqual(details["skipped"], 1)
+                _diagnoses(config)
+                self.assertEqual(run.call_count, 1)
 
 
 if __name__ == "__main__":

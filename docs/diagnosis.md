@@ -34,6 +34,10 @@ HarnessFix 的 GAIA diagnosis prompt 要求模型从预先枚举的 component、
 
 真正影响可审计性和后续修改边界的坐标仍严格校验：task、trajectory turn/tool call、coverage index/layer、evaluation 字段、源码/载荷路径与范围、实际读取记录和源码白名单。`diagnosed` 至少需要一个带真实坐标的支持证据，不能只用自由文本完成归因。若一个可解析候选仍未通过这些校验，会另存为 `candidate.json`。
 
+Prompt 显式提供每个字段的结构和长度上限，包括 `earliest_intervention={turn,tool_call_id?,rationale}`。这里的 turn 必须对应 DeepRead trajectory，行为变化和预期效果放入 counterfactual。两个 evidence 列表各最多 8 项，claim 最多 500 字符，failure/root-cause 最多 1,500 字符；约束在首次调用和 format-repair 中一致提供，避免模型逐次猜测 validator 的隐藏限制。
+
+统一实验入口恢复失败诊断时，若已有 `candidate.json`，新 attempt 会恢复旧 audit 中成功读取过的 source/payload 范围，并重新验证 bundle、源码和载荷哈希，然后直接进行无工具的格式修复。它保留原 attempt，记录父 audit/candidate SHA256 和恢复的读取事件，token 只统计新调用；未曾读取的范围仍然不能引用。首次没有可解析候选的 API 失败仍需重新调查。
+
 证据 anchor 支持五种事实坐标：trajectory turn/tool、evidence coverage 层、evaluation 字段、allowlisted source 行区间、trajectory payload 字符区间。source 和 payload anchor 的 `quote` 是可选的：路径和范围已经证明 agent 读过相应内容；若模型额外给出 quote，validator 仍严格检查它确实位于声明范围内。反驳材料还可使用纯文本 note，因为竞争解释通常是诊断推理，不一定对应单一原文片段。
 
 ## 工具与校验

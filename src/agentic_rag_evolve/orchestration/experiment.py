@@ -605,6 +605,14 @@ def _diagnoses(
         task_root.mkdir(parents=True, exist_ok=True)
         completed = _completed_diagnosis(task_root)
         if completed is None:
+            recovery_path = next((
+                previous
+                for previous in sorted(task_root.glob("attempt-*"), reverse=True)
+                if (previous / "candidate.json").is_file()
+                and (previous / "audit.json").is_file()
+                and _read_json(previous / "audit.json").get("status")
+                in {"validation_error", "error", "interrupted", "running"}
+            ), None)
             attempt_number = len(tuple(task_root.glob("attempt-*"))) + 1
             attempt = task_root / f"attempt-{attempt_number:04d}"
             result = run_diagnosis(
@@ -615,6 +623,7 @@ def _diagnoses(
                 max_rounds=config.diagnosis_max_rounds,
                 max_tool_calls=config.diagnosis_max_tool_calls,
                 max_output_tokens=config.diagnosis_max_output_tokens,
+                recovery_path=recovery_path,
             )
             if result.status not in {"ok", "skipped"}:
                 raise RuntimeError(

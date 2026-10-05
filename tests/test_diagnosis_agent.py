@@ -483,6 +483,90 @@ class DiagnosisAgentTest(unittest.TestCase):
             ["The annotation convention remains ambiguous."],
         )
 
+    def _failed_attempt(self, root: Path, bundle_path: Path) -> Path:
+        previous = root / "attempt-0001"
+        previous.mkdir()
+        candidate = self._diagnosis()
+        candidate["earliest_intervention"] = {"change": "Verify the value."}
+        (previous / "candidate.json").write_text(json.dumps(candidate))
+        (previous / "audit.json").write_text(json.dumps({
+            "schema_version": "deepread-diagnosis-audit-v1",
+            "task_id": "q1",
+            "status": "validation_error",
+            "error": "earliest_intervention has unknown fields: ['change']",
+            "bundle_sha256": hashlib.sha256(bundle_path.read_bytes()).hexdigest(),
+            "events": [{
+                "kind": "tool", "round": 1, "call_id": "read-1",
+                "name": "read_source", "ok": True,
+                "arguments": {
+                    "path": "systems/deepread/DeepRead/agent/runner.py",
+                    "start_line": 1, "end_line": 30,
+                },
+            }],
+        }))
+        return previous
+
+    def test_failed_attempt_recovers_observed_evidence_without_investigation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = self._bundle(root)
+            previous = self._failed_attempt(root, bundle)
+            model = FakeDiagnosisModel([
+                {"choices": [{"message": {"content": json.dumps(self._diagnosis())}}]},
+            ])
+            report = run_diagnosis(
+                bundle_path=bundle, source_root=self.source_root,
+                output_path=root / "attempt-0002", model=model, recovery_path=previous,
+            )
+            audit = json.loads((root / "attempt-0002/audit.json").read_text())
+            original = json.loads((previous / "audit.json").read_text())
+
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.rounds, 1)
+        self.assertEqual(report.tool_calls, 0)
+        self.assertNotIn("tools", model.calls[0])
+        self.assertIn("earliest_intervention is exactly", model.calls[0]["messages"][-1]["content"])
+        self.assertEqual(audit["recovery"]["source_read_count"], 1)
+        self.assertTrue(audit["events"][0]["restored"])
+        self.assertEqual(audit["events"][-1]["mode"], "repair")
+        self.assertEqual(original["status"], "validation_error")
+
+    def test_recovery_still_rejects_source_ranges_not_previously_read(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = self._bundle(root)
+            previous = self._failed_attempt(root, bundle)
+            invalid = self._diagnosis()
+            invalid["affected_sources"][0]["end_line"] = 100
+            model = FakeDiagnosisModel([
+                {"choices": [{"message": {"content": json.dumps(invalid)}}]},
+            ])
+            report = run_diagnosis(
+                bundle_path=bundle, source_root=self.source_root,
+                output_path=root / "attempt-0002", model=model, recovery_path=previous,
+                max_validation_failures=0,
+            )
+            audit = json.loads((root / "attempt-0002/audit.json").read_text())
+
+        self.assertEqual(report.status, "validation_error")
+        self.assertIn("not read", audit["error"])
+
+    def test_recovery_rejects_changed_bundle_before_calling_model(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = self._bundle(root)
+            previous = self._failed_attempt(root, bundle)
+            value = json.loads(bundle.read_text())
+            value["task"]["question"] = "Changed question?"
+            bundle.write_text(json.dumps(value))
+            model = FakeDiagnosisModel([])
+            with self.assertRaisesRegex(ValueError, "bundle changed"):
+                run_diagnosis(
+                    bundle_path=bundle, source_root=self.source_root,
+                    output_path=root / "attempt-0002", model=model, recovery_path=previous,
+                )
+        self.assertEqual(model.calls, [])
+
     def test_validator_allows_detailed_failure_manifestation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bundle = json.loads(self._bundle(Path(directory)).read_text())

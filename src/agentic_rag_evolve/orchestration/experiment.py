@@ -678,9 +678,57 @@ def _hypothesis_cohort(config: ExperimentConfig) -> tuple[Mapping[str, Path], Ma
     return {"primary": output}, dict(cohort.get("counts") or {})
 
 
+def _prepare_planning_retry(
+    output: Path, *, audit_schema: str, successful_statuses: set[str]
+) -> None:
+    """Preserve incomplete attempts before reusing the canonical stage filenames."""
+
+    audit_path = output.with_suffix(".audit.json")
+    candidate_path = output.with_suffix(".candidate.json")
+    existing = [path for path in (output, audit_path, candidate_path) if path.exists()]
+    if not existing:
+        return
+    if not audit_path.is_file():
+        raise ValueError(f"planning output has no audit: {output}")
+    audit = _read_json(audit_path)
+    if audit.get("schema_version") != audit_schema:
+        raise ValueError(f"unsupported planning audit schema: {audit_path}")
+    if audit.get("status") in successful_statuses:
+        if not output.is_file():
+            raise ValueError(f"successful planning audit has no result: {audit_path}")
+        return
+    if audit.get("status") not in {"error", "validation_error", "max_rounds", "running", "interrupted"}:
+        raise ValueError(f"unsupported planning retry status: {audit.get('status')}")
+    history = output.parent / "attempts" / output.stem
+    numbers = [int(path.name.removeprefix("attempt-")) for path in history.glob("attempt-*")]
+    attempt = history / f"attempt-{max(numbers, default=0) + 1:04d}"
+    references = [{"path": path.name, "sha256": _sha256(path)} for path in existing]
+    attempt.mkdir(parents=True)
+    _write_json(attempt / "manifest.json", {
+        "schema_version": "deepread-planning-retry-archive-v1",
+        "stage": output.stem,
+        "status": audit.get("status"),
+        "artifacts": references,
+    })
+    for path in existing:
+        path.rename(attempt / path.name)
+
+
+def _planning_artifacts(output: Path) -> dict[str, Path]:
+    artifacts = {"primary": output, "audit": output.with_suffix(".audit.json")}
+    history = output.parent / "attempts" / output.stem
+    if history.is_dir():
+        artifacts["attempt_history"] = history
+    return artifacts
+
+
 def _hypotheses(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[str, Any]]:
     output = config.output / "planning" / "hypotheses.json"
     audit = output.with_suffix(".audit.json")
+    _prepare_planning_retry(
+        output, audit_schema="deepread-hypothesis-audit-v1",
+        successful_statuses={"ok", "no_eligible_diagnoses"},
+    )
     if output.is_file() and audit.is_file():
         value = _read_json(output)
         details = {
@@ -703,12 +751,16 @@ def _hypotheses(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[s
         if report.status not in {"ok", "no_eligible_diagnoses"}:
             raise RuntimeError(f"hypothesis aggregation failed: {report.status}")
         details = report.to_dict()
-    return {"primary": output, "audit": audit}, details
+    return _planning_artifacts(output), details
 
 
 def _modification_plan(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[str, Any]]:
     output = config.output / "planning" / "plan.json"
     audit = output.with_suffix(".audit.json")
+    _prepare_planning_retry(
+        output, audit_schema="deepread-modification-plan-audit-v1",
+        successful_statuses={"ok", "no_plannable_hypotheses"},
+    )
     if output.is_file() and audit.is_file():
         value = _read_json(output)
         details = {"plan_count": len(value.get("plans") or [])}
@@ -730,7 +782,7 @@ def _modification_plan(config: ExperimentConfig) -> tuple[Mapping[str, Path], Ma
         if report.status not in {"ok", "no_plannable_hypotheses"}:
             raise RuntimeError(f"modification planning failed: {report.status}")
         details = report.to_dict()
-    return {"primary": output, "audit": audit}, details
+    return _planning_artifacts(output), details
 
 
 def _terminal_report(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[str, Any]]:

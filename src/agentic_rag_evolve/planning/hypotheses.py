@@ -59,6 +59,11 @@ Each hypothesis has exactly:
 
 Evidence refs are {task_id, side, index, rationale}, where side is supporting or contradicting and index addresses that diagnosis's corresponding evidence list. Source refs are {task_id, index, rationale}, where index addresses affected_sources. Never copy or invent an evidence anchor or source path. Every clustered task needs at least one supporting ref. Each hypothesis needs counterevidence. Every eligible task must appear exactly once, either in one hypothesis or unclustered_task_ids. A singleton may be retained as an exploratory hypothesis when its mechanism is specific and falsifiable; do not claim recurrence for it."""
 
+SYSTEM_PROMPT += """
+
+Output limits (characters, not tokens): title <=160; common_mechanism <=1500; earliest_intervention_pattern <=800; behavior_delta <=1200; validation.expected_observation and validation.falsifier <=800 each. Every reference rationale and every string-list item <=500.
+At most 12 hypotheses. Per hypothesis: task_ids <=100; supporting_evidence_refs and contradicting_evidence_refs <=24 each; affected_source_refs <=12; inclusion_signals, exclusion_signals, regression_guards, uncertainties <=8 items each. Both inclusion and exclusion lists and the regression guard list must be non-empty. Keep the strongest refs and short rationales. Do not output hypothesis_id or maturity; the framework derives them. unclustered_task_ids <=1000. Return a complete JSON object, with no prose or Markdown."""
+
 
 def _parse_json_object(text: str) -> Mapping[str, Any]:
     stripped = text.strip()
@@ -103,11 +108,13 @@ def run_hypothesis_aggregation(
     cohort_path: Path,
     output_path: Path,
     model: HypothesisModel,
-    max_validation_failures: int = 1,
+    max_validation_failures: int = 3,
     max_output_tokens: int | None = None,
 ) -> HypothesisRunReport:
     if max_validation_failures < 0:
         raise ValueError("max_validation_failures must be non-negative")
+    if max_output_tokens is not None and max_output_tokens < 1:
+        raise ValueError("max_output_tokens must be positive")
     cohort = json.loads(Path(cohort_path).read_text(encoding="utf-8"))
     if cohort.get("schema_version") != "deepread-hypothesis-cohort-v1":
         raise ValueError("unsupported hypothesis cohort schema")
@@ -122,6 +129,7 @@ def run_hypothesis_aggregation(
     audit: dict[str, Any] = {
         "schema_version": "deepread-hypothesis-audit-v1",
         "cohort_id": cohort_id,
+        "cohort_sha256": hashlib.sha256(Path(cohort_path).read_bytes()).hexdigest(),
         "model": model.model_name,
         "events": [],
         "token_usage": {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0},
@@ -159,6 +167,8 @@ def run_hypothesis_aggregation(
             "call": model_calls,
             "status": "pending",
             "message_count": len(messages),
+            "max_output_tokens": max_output_tokens if max_output_tokens is not None
+            else getattr(model, "default_max_output_tokens", None),
             "request_bytes": len(
                 json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode()
             ),
@@ -252,7 +262,9 @@ def run_hypothesis_aggregation(
                         "content": (
                             f"The hypothesis JSON failed validation: {exc}. Return the complete "
                             "corrected JSON. Keep all evidence/source references as cohort indices; "
-                            "do not invent paths or anchors."
+                            "do not invent paths or anchors. If the previous response was "
+                            "truncated, regenerate a complete concise object rather than "
+                            f"continuing from the partial JSON.\n\n{SYSTEM_PROMPT}"
                         ),
                     },
                 ]

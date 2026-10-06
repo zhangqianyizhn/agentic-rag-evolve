@@ -9,6 +9,8 @@
 
 `diagnose` 必须启用 judge。无需诊断的正确题仍生成确定性 bundle，但 diagnosis 会按 route 自动跳过，不产生模型调用。
 
+框架模型调用通过 provider 显式设置输出上限，默认 65,536 tokens，可由 `.env` 中 `LLM_MAX_OUTPUT_TOKENS` 调整。CLI 的 `--diagnosis-max-output-tokens` 优先于 provider 默认值；它同时用于 diagnosis、hypothesis aggregation 和 modification planning。不指定该参数时，不依赖服务商通常较小的默认输出上限。冻结的 DeepRead baseline 调用保持原始配置。输出预算和 `finish_reason` 写入进化 agent audit。
+
 如果所有 modification plan 均 defer，流程生成 `no_candidate` 终态报告。如果存在 proceeding plan，流程生成 `candidate_planned` 报告并停止。候选修改与晋升必须等 development、holdout、cross-dataset cohort 冻结后再进入现有 candidate/validation 编排，不能用单一 development 数据集自动晋升。
 
 ## 服务器示例
@@ -57,6 +59,8 @@ uv run --frozen python runner/run_experiment.py \
 恢复时会重新核对 dataset/documents 哈希及所有已完成 artifact。若尚未冻结 diagnostic bundles，Git revision 变化仍会拒绝恢复；bundles 已完成后，允许只更新进化框架本身，并逐个校验 bundle 中冻结的 DeepRead 可见源码哈希。这样可以修复 diagnosis/orchestration 代码后继续实验，同时仍禁止把变化后的 DeepRead 实现与旧 baseline 混跑。diagnosis 失败会保留原 attempt；恢复时创建下一 attempt，不覆盖诊断审计记录。已有可解析 candidate 时，恢复其成功读取的证据并直接进行无工具格式修复，无需重跑调查；恢复读取仍核对 bundle/source/payload 哈希，成功诊断和 skipped 题继续复用。
 
 ## 产物
+
+Hypothesis aggregation 与 modification planning 失败后，`--resume` 会把原 audit/candidate/未完成结果移入 `planning/attempts/<stage>/attempt-NNNN/`，保存文件哈希，再使用原来的正式输出路径重试。成功结果继续复用；成功 audit 缺少正式结果会明确报损坏，不静默覆盖。完成阶段的 checkpoint 同时冻结重试历史。无需手动删除失败 audit。
 
 ```text
 <output>/

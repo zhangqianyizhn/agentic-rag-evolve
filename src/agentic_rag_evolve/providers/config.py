@@ -101,6 +101,7 @@ def load_chat_model(
         max_retries=max_retries,
         retry_base_seconds=retry_base_seconds,
         retry_max_seconds=retry_max_seconds,
+        default_max_output_tokens=int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "65536")),
     )
 
 

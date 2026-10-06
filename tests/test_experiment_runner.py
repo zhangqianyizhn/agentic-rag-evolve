@@ -14,6 +14,9 @@ from agentic_rag_evolve.orchestration.experiment import (
     ExperimentConfig,
     _completed_diagnosis,
     _diagnoses,
+    _hypotheses,
+    _modification_plan,
+    _prepare_planning_retry,
     _preflight,
 )
 
@@ -229,6 +232,53 @@ class ExperimentRunnerTest(unittest.TestCase):
                 self.assertEqual(details["skipped"], 1)
                 _diagnoses(config)
                 self.assertEqual(run.call_count, 1)
+
+    def test_failed_planning_stages_archive_audits_and_can_resume(self) -> None:
+        for name, action, schema in (
+            ("hypotheses", _hypotheses, "deepread-hypothesis-audit-v1"),
+            ("plan", _modification_plan, "deepread-modification-plan-audit-v1"),
+        ):
+            with self.subTest(stage=name), tempfile.TemporaryDirectory() as directory:
+                config = self._config(Path(directory), mode="diagnose")
+                planning = config.output / "planning"
+                planning.mkdir(parents=True)
+                cohort = {"schema_version": "deepread-hypothesis-cohort-v1",
+                          "cohort_id": "cohort-1", "eligible_diagnoses": []}
+                (planning / "cohort.json").write_text(json.dumps(cohort))
+                if name == "plan":
+                    (planning / "hypotheses.json").write_text(json.dumps({
+                        "schema_version": "deepread-improvement-hypotheses-v1",
+                        "cohort_id": "cohort-1", "status": "no_eligible_diagnoses",
+                        "hypotheses": [],
+                    }))
+                audit = planning / f"{name}.audit.json"
+                failed_bytes = json.dumps({"schema_version": schema, "status": "validation_error"}).encode()
+                audit.write_bytes(failed_bytes)
+                candidate = planning / f"{name}.candidate.json"
+                candidate.write_text("{}")
+                with patch("agentic_rag_evolve.orchestration.experiment.load_chat_model",
+                           return_value=SimpleNamespace(model_name="unused")) as load:
+                    artifacts, _ = action(config)
+                    action(config)
+                    self.assertEqual(load.call_count, 1)
+                archive = artifacts["attempt_history"] / "attempt-0001"
+                self.assertEqual((archive / audit.name).read_bytes(), failed_bytes)
+                self.assertEqual((archive / candidate.name).read_text(), "{}")
+                manifest = json.loads((archive / "manifest.json").read_text())
+                for item in manifest["artifacts"]:
+                    self.assertEqual(hashlib.sha256((archive / item["path"]).read_bytes()).hexdigest(), item["sha256"])
+                self.assertTrue(artifacts["primary"].is_file())
+
+    def test_retry_refuses_to_discard_successful_audit_with_missing_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "hypotheses.json"
+            output.with_suffix(".audit.json").write_text(json.dumps({
+                "schema_version": "deepread-hypothesis-audit-v1", "status": "ok",
+            }))
+            with self.assertRaisesRegex(ValueError, "successful planning audit has no result"):
+                _prepare_planning_retry(output, audit_schema="deepread-hypothesis-audit-v1",
+                                        successful_statuses={"ok"})
+            self.assertTrue(output.with_suffix(".audit.json").is_file())
 
 
 if __name__ == "__main__":

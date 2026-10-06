@@ -418,6 +418,8 @@ def run_diagnosis(
             ),
             "status": "pending",
             "message_count": len(messages),
+            "max_output_tokens": max_output_tokens if max_output_tokens is not None
+            else getattr(model, "default_max_output_tokens", None),
             "request_bytes": len(
                 json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode(
                     "utf-8"

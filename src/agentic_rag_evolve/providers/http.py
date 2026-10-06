@@ -55,6 +55,7 @@ class OpenAICompatibleChatModel:
     retry_base_seconds: float = 1.5
     retry_max_seconds: float = 90.0
     default_headers: Mapping[str, str] = field(default_factory=dict)
+    default_max_output_tokens: int | None = None
     last_attempts: int = field(init=False, default=0)
     last_retry_delays: list[float] = field(init=False, default_factory=list)
 
@@ -70,6 +71,8 @@ class OpenAICompatibleChatModel:
             raise ValueError("chat max_retries must be non-negative")
         if self.retry_base_seconds < 0 or self.retry_max_seconds < 0:
             raise ValueError("chat retry delays must be non-negative")
+        if self.default_max_output_tokens is not None and self.default_max_output_tokens < 1:
+            raise ValueError("default_max_output_tokens must be positive")
 
     def _retry_delay(self, response: requests.Response | None, attempt: int) -> float:
         if response is not None:
@@ -92,6 +95,12 @@ class OpenAICompatibleChatModel:
         request_payload = dict(payload)
         request_payload["model"] = self.model_name
         request_payload["stream"] = False
+        if (
+            self.default_max_output_tokens is not None
+            and "max_tokens" not in request_payload
+            and "max_completion_tokens" not in request_payload
+        ):
+            request_payload["max_tokens"] = self.default_max_output_tokens
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",

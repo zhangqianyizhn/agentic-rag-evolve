@@ -89,6 +89,10 @@ Each plan has exactly:
 
 Return one plan for every hypothesis. Keep changes minimal and conditional on the target cohort. A deferred plan may have an empty allowed_source_refs/development_task_ids but must still state what evidence or recurrence is needed before proceeding."""
 
+SYSTEM_PROMPT += """
+
+Output limits (characters, not tokens): rationale and change_contract.current_behavior <=1000; required_behavior_delta <=1200; each reference rationale <=500; every string-list item <=600. At most 12 plans. allowed_source_refs <=12; development_task_ids <=100, unique; holdout_selection_rules <=8; must_preserve, non_goals, expected_observations, rollback_conditions, regression_scenarios <=10 items each. All string lists must be non-empty, including in deferred plans. risk.level is low, medium, or high. Do not output plan_id, edit_scope, or requires_store_rebuild; the framework derives them."""
+
 
 def _write_json(path: Path, value: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -163,7 +167,7 @@ def run_modification_planning(
     hypotheses_path: Path,
     output_path: Path,
     model: PlanModel,
-    max_validation_failures: int = 1,
+    max_validation_failures: int = 3,
     max_output_tokens: int | None = None,
     memory_context_path: Path | None = None,
     source_root: Path | None = None,
@@ -277,6 +281,7 @@ def run_modification_planning(
             "content": json.dumps(
                 {
                     "cohort_id": cohort_id,
+                    "hypothesis_set_status": hypotheses["status"],
                     "hypotheses": hypotheses["hypotheses"],
                     "planning_memory": memory_context,
                     "source_catalog": source_reader.catalog() if source_reader else [],
@@ -297,6 +302,8 @@ def run_modification_planning(
             "call": model_calls,
             "status": "pending",
             "message_count": len(messages),
+            "max_output_tokens": max_output_tokens if max_output_tokens is not None
+            else getattr(model, "default_max_output_tokens", None),
             "request_bytes": len(
                 json.dumps(messages, ensure_ascii=False, separators=(",", ":")).encode()
             ),

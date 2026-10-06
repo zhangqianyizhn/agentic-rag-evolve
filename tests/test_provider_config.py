@@ -21,6 +21,38 @@ class ProviderConfigTest(unittest.TestCase):
         self.assertEqual(model.model_name, "judge-v1")
         self.assertEqual(model.timeout, 300)
         self.assertEqual(model.max_retries, 0)
+        self.assertEqual(model.default_max_output_tokens, 65536)
+
+    def test_framework_budget_is_explicit_and_caller_limit_takes_precedence(self) -> None:
+        with patch.dict("os.environ", {
+            "LLM_MODEL": "chat", "LLM_BASE_URL": "https://example.invalid/v1",
+            "LLM_API_KEY": "test", "LLM_MAX_OUTPUT_TOKENS": "32768",
+        }, clear=True):
+            model = load_chat_model(max_retries=0)
+        response = Mock(status_code=200)
+        response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        with patch("agentic_rag_evolve.providers.http._count_tokens", return_value=0), patch(
+            "agentic_rag_evolve.providers.http.requests.post", return_value=response
+        ) as post:
+            original = {"messages": []}
+            model.complete(original)
+            self.assertEqual(post.call_args.kwargs["json"]["max_tokens"], 32768)
+            self.assertNotIn("max_tokens", original)
+            model.complete({"messages": [], "max_tokens": 8192})
+            self.assertEqual(post.call_args.kwargs["json"]["max_tokens"], 8192)
+            model.complete({"messages": [], "max_completion_tokens": 4096})
+            self.assertNotIn("max_tokens", post.call_args.kwargs["json"])
+
+    def test_frozen_baseline_provider_keeps_original_output_settings(self) -> None:
+        from agentic_rag_evolve.providers import load_provider_bundle
+        with patch.dict("os.environ", {
+            "LLM_MODEL": "chat", "LLM_BASE_URL": "https://example.invalid/v1",
+            "LLM_API_KEY": "test", "LLM_MAX_OUTPUT_TOKENS": "32768",
+            "EMBEDDING_MODEL_NAME": "embedding", "EMBEDDING_BASE_URL": "https://example.invalid/v1",
+            "EMBEDDING_API_KEY": "test",
+        }, clear=True), patch("agentic_rag_evolve.providers.config.VolcengineMultimodalEmbeddingModel"):
+            bundle = load_provider_bundle()
+        self.assertIsNone(bundle.chat.default_max_output_tokens)
 
     def test_zero_retries_still_makes_one_request(self) -> None:
         with patch.dict(

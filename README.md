@@ -74,6 +74,8 @@ uv run python runner/run_diagnosis.py --bundle <bundle.json> --source-root . --o
 
 正式服务器实验优先使用 `runner/run_experiment.py`，它会串行执行并校验各阶段，支持以完全相同参数加 `--resume` 恢复。`baseline` 模式运行到 trajectory，`diagnose` 模式继续运行诊断、hypothesis 和 modification planning。服务器示例及 candidate 边界见 [统一实验入口](docs/experiment-runner.md)。其余 CLI 保留为可测试、可单独恢复的底层阶段接口。
 
+已完成 planning 的实验可用 `uv run --frozen python -m runner.run_repairs --experiment <experiment-dir> --output <outside-repo-output> --workers 3` 一条命令自动执行全部 proceeding plan 的隔离修改、审计、索引重建和配对评测。默认仅 screening，不晋升；配置额外 holdout/cross-dataset 后可用 `--validation-config <json> --max-iterations 3` 连续演化，自动选择唯一晋升者。详见 [单命令修复与连续迭代](docs/repair-pipeline.md)。
+
 `documents.jsonl` 每行包含 `document_id`、Markdown `path` 和可选 `metadata`。若候选修改了 ingestion/Markdown parser，应在 candidate worktree 中执行 store builder，并同时传入 `--candidate-audit`；候选运行再传入同一个 audit 以及新 store 内的 `--store-manifest`。validation gate 会拒绝复用旧 store 或混用 candidate snapshot。
 
 模型配置由仓库根目录 `.env` 提供，字段模板见 `.env.example`。评测设计及错误语义见 [DeepRead 评测模块](docs/evaluation.md)，事件与轨迹协议见 [DeepRead trajectory](docs/trajectory.md)，诊断 triage 见 [确定性失败信号](docs/failure-signals.md)，诊断输出与引用门禁见 [证据锚定诊断协议](docs/diagnosis.md)，行为门禁与回退再诊断边界见 [validation](docs/validation.md)，候选终态与固化见 [outcome registry](docs/outcome-registry.md)和[materialization](docs/materialization.md)，失败反馈见 [repair memory](docs/repair-memory.md)，演化基线见 [baseline registry](docs/baseline-registry.md)，轮次汇总见 [iteration report](docs/iteration-report.md)。

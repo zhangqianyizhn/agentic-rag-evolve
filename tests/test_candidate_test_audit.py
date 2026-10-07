@@ -107,6 +107,21 @@ class CandidateTestAuditTest(unittest.TestCase):
                     command_runner=self._git_runner,
                 )
 
+    def test_preserves_virtualenv_interpreter_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, _, audit_path, policy_path = self._fixture(root)
+            interpreter = root / "venv/bin/python"
+            interpreter.parent.mkdir(parents=True)
+            interpreter.symlink_to("/usr/bin/python3")
+            def process(command, **kwargs):
+                self.assertEqual(command[0], str(interpreter))
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="Ran 12 tests in 0.01s\n\nOK\n")
+            result = audit_candidate_tests(candidate_audit_path=audit_path, policy_path=policy_path,
+                                           python_executable=interpreter, command_runner=self._git_runner,
+                                           process_runner=process)
+            self.assertTrue(result["passed"])
+
     def test_fails_when_test_count_shrinks(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

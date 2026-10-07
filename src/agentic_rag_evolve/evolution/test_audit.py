@@ -162,7 +162,9 @@ def audit_candidate_tests(
             if timeout < 1 or timeout > 3600 or minimum_tests < 1:
                 raise ValueError(f"{check_id} has invalid timeout or minimum_tests")
             command = [
-                str(Path(python_executable).resolve()), "-m", "unittest", "discover",
+                # Resolving a venv's python symlink selects the base interpreter
+                # and silently loses that venv's installed dependencies.
+                str(Path(python_executable).absolute()), "-m", "unittest", "discover",
                 "-s", start_directory, "-p", pattern, "-v",
             ]
             started = time.monotonic()

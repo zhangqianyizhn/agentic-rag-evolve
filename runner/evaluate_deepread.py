@@ -19,12 +19,16 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--judge", action="store_true", help="Use the configured LLM as a 0-4 judge")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument("--request-timeout", type=int, default=1800)
+    parser.add_argument("--request-max-retries", type=int, default=3)
     parser.add_argument("--historical", type=Path)
     args = parser.parse_args()
 
     if args.output.exists() and any(args.output.iterdir()):
         parser.error(f"evaluation output directory must be empty: {args.output}")
-    judge_model = load_chat_model(args.env_file) if args.judge else None
+    judge_model = load_chat_model(
+        args.env_file, timeout=args.request_timeout, max_retries=args.request_max_retries
+    ) if args.judge else None
     details, summary = evaluate_financebench(
         dataset_path=args.dataset,
         prediction_path=args.predictions,

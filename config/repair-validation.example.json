@@ -1,0 +1,37 @@
+{
+  "schema_version": "deepread-repair-validation-v1",
+  "development_thresholds": {
+    "min_mean_delta": 0.0,
+    "min_improved": 1,
+    "max_regressions": 0,
+    "max_token_cost_ratio": 2.0
+  },
+  "cohorts": [
+    {
+      "name": "financebench-holdout",
+      "dataset": "financebench",
+      "role": "holdout",
+      "dataset_path": "/absolute/data/financebench/splits/holdout.jsonl",
+      "documents": "/absolute/data/financebench/documents.jsonl",
+      "store": "/absolute/data/financebench/stores/holdout-baseline",
+      "task_ids": ["REPLACE_WITH_UNSEEN_FINANCEBENCH_TASK_ID"],
+      "min_mean_delta": 0.0,
+      "min_improved": 0,
+      "max_regressions": 0,
+      "max_token_cost_ratio": 2.0
+    },
+    {
+      "name": "other-cross-dataset",
+      "dataset": "other",
+      "role": "cross_dataset",
+      "dataset_path": "/absolute/data/other/splits/validation.jsonl",
+      "documents": "/absolute/data/other/documents.jsonl",
+      "store": "/absolute/data/other/stores/baseline",
+      "task_ids": ["REPLACE_WITH_OTHER_DATASET_TASK_ID"],
+      "min_mean_delta": 0.0,
+      "min_improved": 0,
+      "max_regressions": 0,
+      "max_token_cost_ratio": 2.0
+    }
+  ]
+}

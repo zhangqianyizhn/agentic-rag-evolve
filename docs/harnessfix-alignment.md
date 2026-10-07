@@ -10,6 +10,7 @@
 | `failure_analysis/` | `diagnostics/` + `diagnosis/` | 确定性 evidence/failure signals 负责分流，诊断 agent 使用开放式假设与强引用校验；不复用 GAIA 的固定失败类别、fix scope 和 HTIR。 |
 | `enhancement_implementation/` 的通用 shell modify agent | `evolution/modifier.py` 的受限工具 agent | 同样执行代码级修改，但只可读取冻结 plan 选中的文件，并以唯一文本替换写入；没有通用 shell，独立 audit 再复核完整 snapshot。 |
 | `run_pipeline_gaia.py` 的单脚本进度 | `orchestration/` ledger + 冻结 runbook executor | 保留逐阶段自动执行，但进度由不可变 hash-chain 事件推导；失败不推进，可从精确阶段恢复，accepted/rejected 使用不同终态分支。 |
+| GAIA 每轮自动聚合一个综合 plan，再串行 modify/validate | `runner/run_repairs.py` 自动执行全部 proceeding plan，可并行隔离候选，轮次串行 | 无人工 plan 选择；同轮候选分别从同一 baseline 开始，通过 promotion gate 后最多自动晋升一个，下一轮重新诊断/规划；缺少验证数据时只做 screening。 |
 | 复制 `enhanced_odr_vN` 目录 | detached Git worktree + 外部 manifest | 保留完整 runner/target 组合和精确 base commit；通过验证后再决定长期分支或 tag。 |
 | validation gate 的 resolved 数量与成本报告 | development/promotion 两级逐题配对门禁 | DeepRead 显式限制平均指标、题级回退、运行异常和 token 成本；promotion 另需跨数据集 cohort。 |
 | promotion 后推进 `current_base_version`、写 accepted/rejected harness memory | outcome registry + materialization/baseline registry + repair/preservation memory | outcome 本身不改变 Git 或 baseline；accepted 只有登记为 baseline 后才产生 preservation memory，rejected 只按源码路径交集反馈可复核事实；sealed validation 不泄露题级反馈，也不沿用固定 defect/operator 分类。 |

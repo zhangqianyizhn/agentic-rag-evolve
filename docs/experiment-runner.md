@@ -13,6 +13,8 @@
 
 如果所有 modification plan 均 defer，流程生成 `no_candidate` 终态报告。如果存在 proceeding plan，流程生成 `candidate_planned` 报告并停止。候选修改与晋升必须等 development、holdout、cross-dataset cohort 冻结后再进入现有 candidate/validation 编排，不能用单一 development 数据集自动晋升。
 
+接续入口为 `runner/run_repairs.py`：自动选择全部 proceeding plan，连续完成修改和评测；无额外验证数据时只 screening，配置完整验证 cohort 后可连续多轮演化。无需手工选 plan 或逐阶段执行 CLI，见 [修复流水线](repair-pipeline.md)。
+
 ## 服务器示例
 
 以下示例把原始 Markdown 保留在 home，把 store 和实验产物写到空间更充足的磁盘：

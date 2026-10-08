@@ -334,6 +334,7 @@ class RepairPipelineTest(unittest.TestCase):
                 legacy.pop("evolution_model")
                 legacy["config"].pop("modification_max_rounds")
                 legacy["config"].pop("modification_max_tool_calls")
+                legacy["models"]["RERANK_MODEL"] = ""
                 write(manifest_path, legacy)
                 legacy_bytes = manifest_path.read_bytes()
                 count = len(commands.calls)
@@ -341,6 +342,7 @@ class RepairPipelineTest(unittest.TestCase):
                     "DEEPREAD_LLM_API_KEY=target-secret\nEVOLUTION_LLM_MODEL=strong\n"
                     "EVOLUTION_LLM_BASE_URL=https://framework.invalid/v1\nEVOLUTION_LLM_API_KEY=framework-secret\n")
                 updated = replace(config, modification_max_rounds=100, modification_max_tool_calls=200)
+                self.assertEqual(run_repairs(updated, resume=True, dry_run=True)["status"], "dry_run")
                 result = run_repairs(updated, resume=True, progress=lambda _: None)
                 self.assertFalse(result["model_changed_from_control"])
                 self.assertEqual(count, len(commands.calls))
@@ -352,6 +354,8 @@ class RepairPipelineTest(unittest.TestCase):
                 config.env_file.write_text(config.env_file.read_text().replace("DEEPREAD_LLM_MODEL=fixture", "DEEPREAD_LLM_MODEL=other"))
                 with self.assertRaisesRegex(ValueError, "models differ"):
                     run_repairs(updated, resume=True, progress=lambda _: None)
+                with self.assertRaisesRegex(ValueError, "models changed since start"):
+                    run_repairs(replace(updated, allow_model_change=True), resume=True, dry_run=True)
 
     def test_all_plans_screened_in_isolated_worktrees_and_resume_skips_api(self):
         with tempfile.TemporaryDirectory() as directory:

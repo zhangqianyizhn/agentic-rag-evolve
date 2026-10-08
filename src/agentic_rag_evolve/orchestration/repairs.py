@@ -562,6 +562,24 @@ def select_winner(reports: list[dict]) -> dict | None:
     return min(eligible, key=score) if eligible else None
 
 
+def _verify_repair_resume(config: RepairConfig, description: dict, frozen: dict) -> None:
+    existing_rounds = [int(path.name.removeprefix("round-"))
+                       for path in config.output.glob("round-*")
+                       if re.fullmatch(r"round-\d+", path.name)]
+    if config.max_iterations < max([frozen["config"]["max_iterations"], *existing_rounds]):
+        raise ValueError("max_iterations cannot be reduced below existing repair rounds/budget")
+    # Execution policy/framework models may change for pending stages.
+    # Completed stage artifacts, target models and inputs remain frozen.
+    for key in ("workers", "max_iterations", "modification_max_rounds",
+                "modification_max_tool_calls", "request_timeout", "request_max_retries"):
+        frozen["config"][key] = description["config"][key]
+    frozen["evolution_model"] = description["evolution_model"]
+    # Legacy dotenv_values recorded absent optional settings as "" instead of null.
+    frozen["models"] = {key: value or None for key, value in frozen["models"].items()}
+    if frozen != description:
+        raise ValueError("repair config/frozen inputs/models changed since start")
+
+
 def run_repairs(
     config: RepairConfig, *, resume: bool = False, dry_run: bool = False,
     progress: Callable[[str], None] = print,
@@ -633,6 +651,8 @@ def run_repairs(
         "final_test_accessed": False,
     }
     if dry_run:
+        if resume and frozen_manifest.is_file():
+            _verify_repair_resume(config, description, _read_json(frozen_manifest))
         return {**description, "status": "dry_run", "writes_performed": False}
     config.output.mkdir(parents=True, exist_ok=True)
     with (config.output / ".run.lock").open("a") as lock:
@@ -641,20 +661,7 @@ def run_repairs(
         if manifest.exists():
             if not resume:
                 raise FileExistsError("repair run exists; use --resume")
-            frozen = _read_json(manifest)
-            existing_rounds = [int(path.name.removeprefix("round-"))
-                               for path in config.output.glob("round-*")
-                               if re.fullmatch(r"round-\d+", path.name)]
-            if config.max_iterations < max([frozen["config"]["max_iterations"], *existing_rounds]):
-                raise ValueError("max_iterations cannot be reduced below existing repair rounds/budget")
-            # Execution policy/framework models may change for pending stages.
-            # Completed stage artifacts, target models and inputs remain frozen.
-            for key in ("workers", "max_iterations", "modification_max_rounds",
-                        "modification_max_tool_calls", "request_timeout", "request_max_retries"):
-                frozen["config"][key] = description["config"][key]
-            frozen["evolution_model"] = description["evolution_model"]
-            if frozen != description:
-                raise ValueError("repair config/frozen inputs/models changed since start")
+            _verify_repair_resume(config, description, _read_json(manifest))
         else:
             if any(p.name != ".run.lock" for p in config.output.iterdir()):
                 raise FileExistsError("repair output is non-empty without a manifest")

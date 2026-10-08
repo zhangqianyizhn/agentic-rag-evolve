@@ -33,3 +33,5 @@ HarnessFix 的诊断输出采用完整示例模板，但运行端只要求可解
 - DeepRead 只能通过 `ports.py` 中的 `ChatModel`、`EmbeddingModel` 和 `Reranker` 能力接口调用模型。
 
 默认修复范围不包含 `runner/` 和 provider adapters。检索 query、候选融合、工具调用策略仍属于 DeepRead，可作为后续进化对象。
+
+模型也在这一边界外分工：`DEEPREAD_LLM_*` 供被测 DeepRead，`EVOLUTION_LLM_*` 供诊断/分析/修改及 LLM judge，不增加 target agent 内部角色或 provider 逻辑。修复批次运行时，框架/provider 使用当前主仓库实现，`systems/` 使用候选 checkout；因此旧冻结候选也能使用新配置，目标源码不变。修改预算默认 60 轮/120 次工具调用，可在入口覆盖，与完整演化轮数和 DeepRead 问答轮数分别管理。

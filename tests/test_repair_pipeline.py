@@ -320,6 +320,39 @@ class RepairPipelineTest(unittest.TestCase):
                 report = run_repairs(replace(config, allow_model_change=True), dry_run=True)
             self.assertTrue(report["model_changed_from_control"])
 
+    def test_legacy_resume_can_upgrade_framework_and_budgets_without_rerunning_completed_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, initial, base = self.fixture(Path(directory))
+            self.freeze_experiment(config, initial, base)
+            commands = FixtureCommands(config)
+            with patch.dict(os.environ, {}, clear=True), patch(
+                "agentic_rag_evolve.orchestration.repairs._command", side_effect=commands
+            ):
+                run_repairs(config, progress=lambda _: None)
+                manifest_path = config.output / "manifest.json"
+                legacy = json.loads(manifest_path.read_text())
+                legacy.pop("evolution_model")
+                legacy["config"].pop("modification_max_rounds")
+                legacy["config"].pop("modification_max_tool_calls")
+                write(manifest_path, legacy)
+                legacy_bytes = manifest_path.read_bytes()
+                count = len(commands.calls)
+                config.env_file.write_text("DEEPREAD_LLM_MODEL=fixture\nDEEPREAD_LLM_BASE_URL=https://target.invalid/v1\n"
+                    "DEEPREAD_LLM_API_KEY=target-secret\nEVOLUTION_LLM_MODEL=strong\n"
+                    "EVOLUTION_LLM_BASE_URL=https://framework.invalid/v1\nEVOLUTION_LLM_API_KEY=framework-secret\n")
+                updated = replace(config, modification_max_rounds=100, modification_max_tool_calls=200)
+                result = run_repairs(updated, resume=True, progress=lambda _: None)
+                self.assertFalse(result["model_changed_from_control"])
+                self.assertEqual(count, len(commands.calls))
+                self.assertEqual(manifest_path.read_bytes(), legacy_bytes)
+                session = json.loads((config.output / "execution/attempt-0002.json").read_text())
+                self.assertEqual(session["evolution_model"], "strong")
+                self.assertEqual(session["config"]["modification_max_rounds"], 100)
+                self.assertNotIn("framework-secret", json.dumps(session))
+                config.env_file.write_text(config.env_file.read_text().replace("DEEPREAD_LLM_MODEL=fixture", "DEEPREAD_LLM_MODEL=other"))
+                with self.assertRaisesRegex(ValueError, "models differ"):
+                    run_repairs(updated, resume=True, progress=lambda _: None)
+
     def test_all_plans_screened_in_isolated_worktrees_and_resume_skips_api(self):
         with tempfile.TemporaryDirectory() as directory:
             config, initial, base = self.fixture(Path(directory))
@@ -387,6 +420,45 @@ class RepairPipelineTest(unittest.TestCase):
             dirs = list((config.output / "round-0001/candidates").glob("*/attempt-*/worktree"))
             self.assertEqual(len(dirs), 3)
             self.assertTrue(all("VALUE = 1" not in (d / SOURCE).read_text() for d in dirs))
+
+    def test_failed_batch_resumes_with_new_framework_model_and_larger_edit_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, initial, base = self.fixture(Path(directory))
+            self.freeze_experiment(config, initial, base)
+            commands = FixtureCommands(config)
+            failed = []
+            def fail_once(*args, **kwargs):
+                result = commands(*args, **kwargs)
+                if args[2] == "runner.run_candidate_modification" and not failed:
+                    failed.append(True)
+                    raise RuntimeError("budget exhausted")
+                return result
+            with patch.dict(os.environ, {}, clear=True), patch(
+                "agentic_rag_evolve.orchestration.repairs._command", side_effect=fail_once
+            ):
+                self.assertEqual(run_repairs(config, progress=lambda _: None)["status"], "failed")
+                config.env_file.write_text(config.env_file.read_text() +
+                    "EVOLUTION_LLM_MODEL=strong\nEVOLUTION_LLM_BASE_URL=https://strong.invalid/v1\n"
+                    "EVOLUTION_LLM_API_KEY=strong-key\n")
+                upgraded = replace(config, modification_max_rounds=100, modification_max_tool_calls=200)
+                self.assertEqual(run_repairs(upgraded, resume=True, progress=lambda _: None)["status"], "completed")
+            self.assertEqual(commands.calls.count("runner.run_candidate_modification"), 3)
+            self.assertEqual(len(list((config.output / "round-0001/candidates").glob("*/attempt-*/worktree"))), 3)
+
+    def test_outer_round_limit_can_be_extended_on_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, initial, base = self.fixture(Path(directory), promotion=True)
+            self.freeze_experiment(config, initial, base)
+            commands = FixtureCommands(config)
+            with patch.dict(os.environ, {}, clear=True), patch(
+                "agentic_rag_evolve.orchestration.repairs._command", side_effect=commands
+            ):
+                first = run_repairs(config, progress=lambda _: None)
+                report = run_repairs(replace(config, max_iterations=2), resume=True, progress=lambda _: None)
+                self.assertEqual(report["rounds"][0], first["rounds"][0])
+                self.assertEqual(len(report["rounds"]), 2)
+                with self.assertRaisesRegex(ValueError, "cannot be reduced"):
+                    run_repairs(config, resume=True, progress=lambda _: None)
 
     def test_rejected_round_replans_with_memory_without_rerunning_baseline_diagnosis(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -471,7 +543,46 @@ class RepairPipelineTest(unittest.TestCase):
             with patch("subprocess.run", side_effect=process):
                 _command(config, directory, "runner.run_deepread", [], cwd=candidate)
             self.assertEqual(seen["cwd"], candidate)
-            self.assertEqual(seen["env"]["PYTHONPATH"].split(":"), [str(candidate / "src"), str(candidate)])
+            self.assertEqual(seen["env"]["PYTHONPATH"].split(os.pathsep),
+                             [str(config.repo_root / "src"), str(candidate), str(config.repo_root)])
+
+    def test_real_subprocess_uses_current_framework_with_old_candidate_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, _, _ = self.fixture(Path(directory))
+            command_dir = Path(directory) / "command"
+            command_dir.mkdir()
+            candidate = Path(directory) / "old-candidate"
+            for path, contents in (
+                (config.repo_root / "src/agentic_rag_evolve/__init__.py", 'VERSION="current-framework"\n'),
+                (candidate / "src/agentic_rag_evolve/__init__.py", 'VERSION="old-framework"\n'),
+                (config.repo_root / "systems/__init__.py", 'VERSION="main-target"\n'),
+                (candidate / "systems/__init__.py", 'VERSION="candidate-target"\n'),
+                (candidate / "runner/__init__.py", ""),
+                (candidate / "runner/probe.py", 'import json, systems, agentic_rag_evolve\n'
+                 'print(json.dumps({"framework":agentic_rag_evolve.VERSION,"target":systems.VERSION}))\n'),
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(contents)
+            result = _command(config, command_dir, "runner.probe", [], cwd=candidate)
+            self.assertEqual(result, {"framework": "current-framework", "target": "candidate-target"})
+
+    def test_modification_budgets_reach_command_and_reject_nonpositive_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config, initial, base = self.fixture(Path(directory))
+            config = replace(config, modification_max_rounds=90, modification_max_tool_calls=180)
+            commands = FixtureCommands(config)
+            def command(config, directory, module, arguments, **kwargs):
+                if module == "runner.run_candidate_modification":
+                    arguments = list(map(str, arguments))
+                    self.assertEqual(arguments[arguments.index("--max-rounds") + 1], "90")
+                    self.assertEqual(arguments[arguments.index("--max-tool-calls") + 1], "180")
+                return commands(config, directory, module, arguments, **kwargs)
+            with patch("agentic_rag_evolve.orchestration.repairs._command", side_effect=command):
+                result = _run_rounds(config, {"base_commit": base}, initial, _cohorts(config, config.experiment), lambda _: None)
+            self.assertEqual(result["status"], "completed")
+            for key in ("modification_max_rounds", "modification_max_tool_calls"):
+                with self.assertRaisesRegex(ValueError, "budgets must be positive"):
+                    replace(config, **{key: 0})
 
     def test_multi_round_requires_validation(self):
         with tempfile.TemporaryDirectory() as directory:

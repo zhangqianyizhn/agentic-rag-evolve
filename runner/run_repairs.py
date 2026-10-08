@@ -18,6 +18,8 @@ def main() -> int:
     parser.add_argument("--base-revision")
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--max-iterations", type=int, default=1)
+    parser.add_argument("--modification-max-rounds", type=int, default=60)
+    parser.add_argument("--modification-max-tool-calls", type=int, default=120)
     parser.add_argument("--request-timeout", type=int, default=1800)
     parser.add_argument("--request-max-retries", type=int, default=3)
     parser.add_argument("--allow-model-change", action="store_true")

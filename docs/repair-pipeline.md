@@ -38,19 +38,38 @@ development 默认是整个原实验任务集，必须与 holdout 互斥。附�
 
 ## 恢复与检查
 
-原命令追加 `--resume` 即可恢复；追加 `--dry-run` 可只核对输入、源码版本、数据角色和自动选中的计划，不创建文件、不调用模型。API 密钥不进入 manifest，可轮换；模型名称、输入文件、测试策略和原始实验结果被哈希冻结。未显式指定 `--base-revision` 时，首次使用 HEAD，恢复沿用首次冻结的 commit，不随当前 HEAD 漂移。
+原命令追加 `--resume` 即可恢复；追加 `--dry-run` 可只核对输入、源码版本、数据角色和自动选中的计划，不创建文件、不调用模型。API 密钥不进入 manifest，可轮换；目标模型名称、输入文件、测试策略和原始实验结果保持冻结。未显式指定 `--base-revision` 时，首次使用 HEAD，恢复沿用首次冻结的 commit，不随当前 HEAD 漂移。
 
-默认拒绝与原 baseline 不同的 LLM、embedding 或 reranker 模型；若只验证框架且接受这个对照混杂因素，可显式加 `--allow-model-change`，报告会记录这一变化，不能把结果作为严格修复收益。embedding 模型仍须与既有向量索引兼容。
+默认拒绝与原 baseline 不同的 **DeepRead LLM**、embedding 或 reranker 模型；若只验证框架且接受这个对照混杂因素，可显式加 `--allow-model-change` 开始新的 repair run，报告会记录这一变化，不能把结果作为严格修复收益。已有 repair run 的目标模型仍不能在恢复时更换。embedding 模型仍须与既有向量索引兼容。
 
 每个阶段的失败日志和部分产物保存在独立 attempt 目录，不覆盖或删除。中断的修改可能已改动源码，因此新尝试会创建新的 worktree；成功候选和已完成评测继续复用。索引重建或 inference 中断后，重试使用新输出目录；**当前恢复粒度是阶段，不是逐 query/逐 embedding**，这类阶段可能需要重跑。下一轮 diagnosis 继续复用已有 experiment checkpoint 的题级诊断恢复能力。
 
 共享账号限流时，可在 `--resume` 时把 `--workers 3` 降到 `--workers 1`；这只改变并发调度，不改变冻结的实验数据、模型或目标代码。
+
+## 两套模型配置与修改预算
+
+新的完整模板见 [.env.example](../.env.example)。DeepRead 使用 `DEEPREAD_LLM_MODEL`、`DEEPREAD_LLM_BASE_URL`、`DEEPREAD_LLM_API_KEY`；诊断、聚合、计划、修改、LLM judge 使用 `EVOLUTION_LLM_MODEL`、`EVOLUTION_LLM_BASE_URL`、`EVOLUTION_LLM_API_KEY`。两组可连接不同服务商、账号和性能的模型。embedding/rerank 的配置仍独立，复用已有 store 时应保持原 embedding 配置与维度。
+
+每组 endpoint 的三项字段必须一起配置，避免把新 endpoint 与旧密钥拼接。某组的三项字段全部未设置时，才整体回退到旧 `LLM_*`；因此现有 `.env` 无需立即迁移，也可仅新增完整的 `EVOLUTION_LLM_*`，保持 DeepRead 使用旧配置。环境变量优先于指定 env 文件；读取不同 env 文件不会污染后续加载。`EVOLUTION_LLM_MAX_OUTPUT_TOKENS` 默认 65536，显式 CLI 上限优先；DeepRead 保持冻结版本的输出配置，不应用这一框架预算。
+
+修改 agent 默认从 **20 轮 / 30 次工具调用**提高到 **60 轮 / 120 次工具调用**。单命令入口支持：
+
+```bash
+--modification-max-rounds 100 --modification-max-tool-calls 200
+```
+
+它们可在 `--resume` 时更改；并发、超时、请求重试可调整，外层 `max_iterations` 可增加（不能缩小至已存在的轮次或原预算以下）。外层多轮仍须提供完整验证配置，不会放宽 promotion gate 或把旧 development 数据当作 holdout。`--max-iterations` 是完整演化轮数，修改 agent 的轮数预算是另一层，DeepRead 原问答 `max_rounds` 不变。单独执行 `run_candidate_modification` 时使用 `--max-rounds` / `--max-tool-calls`。
+
+框架模型也可在恢复时升级，不需要 `--allow-model-change`。原 manifest 不覆盖，`execution/attempt-NNNN.json` 记录每次启动的有效配置和非秘密模型名；新执行的 `command.json` 记录两种模型名。已完成候选/评测继续复用；失败修改保留旧产物、从冻结 base 创建新候选尝试。当前框架的 provider 始终负责两套配置，候选的 `systems/` 源码始终来自候选 checkout，旧候选也适用。
+
+注意：LLM judge 属于框架模型。中途升级框架模型时，复用的旧评分和新评分可能来自不同 judge，适合目前的框架验证，不属于统一 judge 的严格实验。严谨实验应从新输出目录运行，并对 baseline/candidate 使用相同 judge；不应把 mixed-judge 的变化直接归因于补丁。
 
 结果与日志：
 
 ```text
 <output>/
   manifest.json                # 冻结配置、非秘密模型名称和输入哈希
+  execution/attempt-NNNN.json   # 每次运行/恢复的有效预算与框架模型
   report.json                  # 整体结果；失败时记录 resume_required
   round-0001/report.json       # 本轮候选比较及唯一晋升者
   round-0001/candidates/<plan>/attempt-0001/

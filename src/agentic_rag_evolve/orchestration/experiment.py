@@ -34,6 +34,7 @@ from agentic_rag_evolve.providers import (
     load_embedding_model,
     load_provider_bundle,
 )
+from agentic_rag_evolve.providers.config import llm_environment, provider_environment
 from agentic_rag_evolve.reporting import build_no_candidate_iteration_report
 from agentic_rag_evolve.store_build import (
     build_markdown_store,
@@ -382,6 +383,7 @@ def _preflight(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[st
             "embedding": settings.embedding_model,
             "reranker": settings.rerank_model,
         },
+        "evolution_model": llm_environment(provider_environment(config.env_file), "evolution")["MODEL"] or None,
         "paths": {
             "store": str(config.store),
             "output": str(config.output),

@@ -9,7 +9,9 @@
 
 `diagnose` 必须启用 judge。无需诊断的正确题仍生成确定性 bundle，但 diagnosis 会按 route 自动跳过，不产生模型调用。
 
-框架模型调用通过 provider 显式设置输出上限，默认 65,536 tokens，可由 `.env` 中 `LLM_MAX_OUTPUT_TOKENS` 调整。CLI 的 `--diagnosis-max-output-tokens` 优先于 provider 默认值；它同时用于 diagnosis、hypothesis aggregation 和 modification planning。不指定该参数时，不依赖服务商通常较小的默认输出上限。冻结的 DeepRead baseline 调用保持原始配置。输出预算和 `finish_reason` 写入进化 agent audit。
+框架模型调用通过 provider 显式设置输出上限，默认 65,536 tokens，可由 `.env` 中 `EVOLUTION_LLM_MAX_OUTPUT_TOKENS` 调整（旧单模型配置兼容 `LLM_MAX_OUTPUT_TOKENS`）。CLI 的 `--diagnosis-max-output-tokens` 优先于 provider 默认值；它同时用于 diagnosis、hypothesis aggregation 和 modification planning。不指定该参数时，不依赖服务商通常较小的默认输出上限。冻结的 DeepRead baseline 调用保持原始配置。输出预算和 `finish_reason` 写入进化 agent audit。
+
+DeepRead 使用 `DEEPREAD_LLM_*`，框架诊断/规划/修改/LLM judge 使用 `EVOLUTION_LLM_*`，均由稳定 provider 加载；embedding 保持独立。完整配置模板见 [.env.example](../.env.example)，兼容规则与续跑预算见 [repair pipeline](repair-pipeline.md#两套模型配置与修改预算)。preflight 分别记录 target 和 evolution 模型名，不记录密钥。
 
 如果所有 modification plan 均 defer，流程生成 `no_candidate` 终态报告。如果存在 proceeding plan，流程生成 `candidate_planned` 报告并停止。候选修改与晋升必须等 development、holdout、cross-dataset cohort 冻结后再进入现有 candidate/validation 编排，不能用单一 development 数据集自动晋升。
 

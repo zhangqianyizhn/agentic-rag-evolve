@@ -21,8 +21,8 @@ def main() -> int:
     parser.add_argument("--request-max-retries", type=int, default=3)
     parser.add_argument("--request-retry-base-seconds", type=float, default=15.0)
     parser.add_argument("--request-retry-max-seconds", type=float, default=120.0)
-    parser.add_argument("--max-rounds", type=int, default=20)
-    parser.add_argument("--max-tool-calls", type=int, default=30)
+    parser.add_argument("--max-rounds", type=int, default=60)
+    parser.add_argument("--max-tool-calls", type=int, default=120)
     parser.add_argument("--max-output-tokens", type=int)
     args = parser.parse_args()
     report = run_candidate_modification(

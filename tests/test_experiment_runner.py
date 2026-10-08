@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -189,6 +190,20 @@ class ExperimentRunnerTest(unittest.TestCase):
         self.assertEqual(report["document_count"], 1)
         self.assertFalse(report["secrets_recorded"])
         self.assertNotIn("test", json.dumps(report))
+
+    def test_preflight_records_distinct_roles_without_endpoint_or_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True):
+            config = self._config(Path(directory))
+            with config.env_file.open("a") as stream:
+                stream.write("DEEPREAD_LLM_MODEL=target\nDEEPREAD_LLM_BASE_URL=https://target.invalid/v1\n"
+                    "DEEPREAD_LLM_API_KEY=target-secret\nEVOLUTION_LLM_MODEL=framework\n"
+                    "EVOLUTION_LLM_BASE_URL=https://framework.invalid/v1\nEVOLUTION_LLM_API_KEY=framework-secret\n")
+            artifacts, _ = _preflight(config)
+            report = json.loads(artifacts["primary"].read_text())
+            self.assertEqual(report["models"]["chat"], "target")
+            self.assertEqual(report["evolution_model"], "framework")
+            self.assertNotIn("secret", json.dumps(report["models"]))
+            self.assertNotIn("invalid", json.dumps(report))
 
     def test_diagnosis_resume_selects_latest_completed_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

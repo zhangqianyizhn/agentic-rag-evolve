@@ -278,8 +278,8 @@ def run_candidate_modification(
     plan_path: Path,
     output_path: Path,
     model: ModificationModel,
-    max_rounds: int = 20,
-    max_tool_calls: int = 30,
+    max_rounds: int = 60,
+    max_tool_calls: int = 120,
     max_output_tokens: int | None = None,
 ) -> CandidateModificationReport:
     if max_rounds < 1 or max_tool_calls < 1:

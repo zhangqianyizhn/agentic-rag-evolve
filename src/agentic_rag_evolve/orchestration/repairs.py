@@ -20,8 +20,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from dotenv import dotenv_values
-
 from agentic_rag_evolve.deepread_runner import load_financebench_queries
 from agentic_rag_evolve.evolution import (
     advance_baseline_registry,
@@ -36,6 +34,7 @@ from agentic_rag_evolve.planning import (
     build_repair_memory,
 )
 from agentic_rag_evolve.reporting import build_iteration_report
+from agentic_rag_evolve.providers.config import llm_environment, provider_environment
 from agentic_rag_evolve.store_build import verify_store_manifest
 from agentic_rag_evolve.validation.gate import _pair_cohort
 
@@ -61,6 +60,8 @@ class RepairConfig:
     base_revision: str | None = None
     workers: int = 1
     max_iterations: int = 1
+    modification_max_rounds: int = 60
+    modification_max_tool_calls: int = 120
     request_timeout: int = 1800
     request_max_retries: int = 3
     allow_model_change: bool = False
@@ -72,6 +73,8 @@ class RepairConfig:
                 object.__setattr__(self, name, Path(value).resolve())
         if self.workers < 1 or self.max_iterations < 1:
             raise ValueError("workers and max_iterations must be positive")
+        if self.modification_max_rounds < 1 or self.modification_max_tool_calls < 1:
+            raise ValueError("modification budgets must be positive")
         if self.request_timeout < 1 or self.request_max_retries < 0:
             raise ValueError("invalid request timeout/retries")
         if self.max_iterations > 1 and self.validation_config is None:
@@ -150,9 +153,13 @@ def _command(
     *, cwd: Path | None = None, allowed_codes: tuple[int, ...] = (0,),
 ) -> dict:
     source = cwd or config.repo_root
-    env = dict(os.environ)
-    # Explicit precedence avoids an editable main-repo install shadowing target code.
-    env["PYTHONPATH"] = os.pathsep.join([str(source / "src"), str(source)])
+    env = provider_environment(config.env_file)
+    llm_models = {role: llm_environment(env, role)["MODEL"]
+                  for role in ("deepread", "evolution")}
+    # Providers/orchestration belong to the current stable framework; systems
+    # belong to the candidate. Old frozen checkouts must also use dual-role config.
+    env["PYTHONPATH"] = os.pathsep.join([str(config.repo_root / "src"), str(source),
+                                      str(config.repo_root)])
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     stdout = directory / "stdout.log"
     stderr = directory / "stderr.log"
@@ -169,6 +176,7 @@ def _command(
     _write_json(directory / "command.json", {
         "module": module, "arguments": list(map(str, arguments)),
         "cwd": str(source), "returncode": value.returncode,
+        "llm_models": llm_models,
     })
     if value.returncode not in allowed_codes:
         raise RuntimeError(f"{module} failed ({value.returncode}); see {stderr}")
@@ -397,7 +405,9 @@ def _run_plan(
             lambda d: ["--manifest", manifest, "--plan", plan_path,
                        "--output", d / "modification.json", "--env-file", config.env_file,
                        "--request-timeout", str(config.request_timeout),
-                       "--request-max-retries", str(config.request_max_retries)],
+                       "--request-max-retries", str(config.request_max_retries),
+                       "--max-rounds", str(config.modification_max_rounds),
+                       "--max-tool-calls", str(config.modification_max_tool_calls)],
             lambda d, _: {"modification": d / "modification.json"},
         )
         modification = Path(modified["paths"]["modification"])
@@ -588,11 +598,13 @@ def run_repairs(
         used_keys |= keys
     plan_path = config.experiment / "planning" / "plan.json"
     plans = proceeding_plans(_read_json(plan_path))
-    env = dotenv_values(config.env_file)
+    env = provider_environment(config.env_file)
+    target_llm = llm_environment(env, "deepread")
+    evolution_llm = llm_environment(env, "evolution")
     baseline_models = _read_json(config.experiment / "baseline/manifest.json")["providers"]
-    current_models = {name: (os.environ.get(field) or env.get(field) or None)
-                      for name, field in (("chat", "LLM_MODEL"), ("embedding", "EMBEDDING_MODEL_NAME"),
-                                          ("reranker", "RERANK_MODEL"))}
+    current_models = {"chat": target_llm["MODEL"] or None,
+                      "embedding": env.get("EMBEDDING_MODEL_NAME") or None,
+                      "reranker": env.get("RERANK_MODEL") or None}
     model_changed = any(current_models[name] != model for name, model in baseline_models.items())
     if model_changed and not config.allow_model_change:
         raise ValueError("provider models differ from baseline; rerun control or explicitly use --allow-model-change")
@@ -600,9 +612,11 @@ def run_repairs(
         "schema_version": "deepread-repair-run-v1",
         "config": {k: str(v) if isinstance(v, Path) else v for k, v in asdict(config).items()},
         "base_commit": base, "plan_ids": [p["plan_id"] for p in plans],
-        "models": {key: os.environ.get(key) or env.get(key) for key in (
-            "LLM_MODEL", "EMBEDDING_MODEL_NAME", "EMBEDDING_DIMENSION", "RERANK_MODEL",
-        )},
+        # Keep the historical target key so old runs can resume without migration.
+        "models": {"LLM_MODEL": target_llm["MODEL"] or None,
+                   **{key: env.get(key) or None for key in (
+                       "EMBEDDING_MODEL_NAME", "EMBEDDING_DIMENSION", "RERANK_MODEL")}},
+        "evolution_model": evolution_llm["MODEL"] or None,
         "model_changed_from_control": model_changed,
         "control_models": baseline_models,
         "inputs": {str(path): _sha256(path) for path in (
@@ -628,15 +642,31 @@ def run_repairs(
             if not resume:
                 raise FileExistsError("repair run exists; use --resume")
             frozen = _read_json(manifest)
-            # Concurrency is scheduling, not a new target/data/model condition.
-            # Permit backing off after shared-account rate limits on resume.
-            frozen["config"]["workers"] = description["config"]["workers"]
+            existing_rounds = [int(path.name.removeprefix("round-"))
+                               for path in config.output.glob("round-*")
+                               if re.fullmatch(r"round-\d+", path.name)]
+            if config.max_iterations < max([frozen["config"]["max_iterations"], *existing_rounds]):
+                raise ValueError("max_iterations cannot be reduced below existing repair rounds/budget")
+            # Execution policy/framework models may change for pending stages.
+            # Completed stage artifacts, target models and inputs remain frozen.
+            for key in ("workers", "max_iterations", "modification_max_rounds",
+                        "modification_max_tool_calls", "request_timeout", "request_max_retries"):
+                frozen["config"][key] = description["config"][key]
+            frozen["evolution_model"] = description["evolution_model"]
             if frozen != description:
                 raise ValueError("repair config/frozen inputs/models changed since start")
         else:
             if any(p.name != ".run.lock" for p in config.output.iterdir()):
                 raise FileExistsError("repair output is non-empty without a manifest")
             _write_json(manifest, description)
+        # Preserve the initial manifest; record each invocation's effective policy
+        # separately, including upgrades from legacy single-model manifests.
+        sessions = config.output / "execution"
+        sessions.mkdir(exist_ok=True)
+        session = sessions / f"attempt-{len(list(sessions.glob('attempt-*.json'))) + 1:04d}.json"
+        _write_json(session, {"resume": resume, "config": description["config"],
+                              "models": description["models"],
+                              "evolution_model": description["evolution_model"]})
         return _run_rounds(config, description, initial, cohorts, progress)
 
 

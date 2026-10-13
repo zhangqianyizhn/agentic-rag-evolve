@@ -9,6 +9,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
+from agentic_rag_evolve.telemetry.evolution import traced_agent
 
 from .hypothesis_validator import HypothesisValidationError, validate_hypotheses
 
@@ -103,6 +104,7 @@ def _empty_result(cohort: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+@traced_agent("hypothesis_aggregation")
 def run_hypothesis_aggregation(
     *,
     cohort_path: Path,

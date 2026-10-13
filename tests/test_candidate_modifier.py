@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from agentic_rag_evolve.evolution import audit_candidate, run_candidate_modification
+from agentic_rag_evolve.telemetry.evolution import reconstruct_requests
 
 
 ALLOWED = "systems/deepread/DeepRead/agent/runner.py"
@@ -132,13 +133,22 @@ class CandidateModifierTest(unittest.TestCase):
             root = Path(directory)
             candidate, plan, manifest = _fixture(root)
             output = root / "modification.json"
+            model = FakeModel(responses)
             report = run_candidate_modification(
                 manifest_path=manifest,
                 plan_path=plan,
                 output_path=output,
-                model=FakeModel(responses),
+                model=model,
             )
             artifact = json.loads(output.read_text())
+            trace = json.loads(output.with_suffix(".trace.json").read_text())
+            self.assertEqual(list(reconstruct_requests(trace)), model.calls)
+            tools = [event for event in trace["events"] if event["type"] == "tool"]
+            self.assertEqual(len(tools), 4)
+            self.assertEqual(tools[1]["arguments"]["old_text"], "    return 1")
+            self.assertEqual(tools[1]["arguments"]["new_text"], "    return 2")
+            self.assertIn("return 2", json.dumps(tools[2]["result"]))
+            self.assertEqual(trace["outcome"]["status"], "modified")
             audit = audit_candidate(
                 manifest_path=manifest,
                 plan_path=plan,

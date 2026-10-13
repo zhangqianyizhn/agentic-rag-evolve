@@ -209,11 +209,15 @@ class ExperimentConfig:
     request_max_retries: int = 3
     request_retry_base_seconds: float = 15.0
     request_retry_max_seconds: float = 120.0
+    reuse_baseline_experiment: Path | None = None
 
     def __post_init__(self) -> None:
         for field in ("source_root", "documents", "dataset", "store", "output", "env_file"):
             object.__setattr__(self, field, Path(getattr(self, field)).resolve())
         object.__setattr__(self, "task_ids", tuple(str(item) for item in self.task_ids))
+        if self.reuse_baseline_experiment is not None:
+            object.__setattr__(self, "reuse_baseline_experiment",
+                               Path(self.reuse_baseline_experiment).resolve())
         if not self.experiment_id.strip():
             raise ValueError("experiment_id must not be empty")
         if self.mode not in {"baseline", "diagnose"}:
@@ -234,6 +238,11 @@ class ExperimentConfig:
         for key in ("source_root", "documents", "dataset", "store", "output", "env_file"):
             value[key] = str(value[key])
         value["task_ids"] = list(self.task_ids)
+        # Preserve the legacy manifest shape for experiments not using replay.
+        if self.reuse_baseline_experiment is None:
+            value.pop("reuse_baseline_experiment")
+        else:
+            value["reuse_baseline_experiment"] = str(self.reuse_baseline_experiment)
         return value
 
 
@@ -350,6 +359,9 @@ class ExperimentCheckpoint:
 
 
 def _preflight(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[str, Any]]:
+    if config.reuse_baseline_experiment is not None:
+        from .baseline_reuse import validate_baseline_reuse
+        validate_baseline_reuse(config)
     if not config.source_root.is_dir():
         raise FileNotFoundError(f"source root not found: {config.source_root}")
     if not config.env_file.is_file():
@@ -423,6 +435,9 @@ def _store(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[str, A
 def _baseline(
     config: ExperimentConfig, progress: Callable[[str], None] | None = None
 ) -> tuple[Mapping[str, Path], Mapping[str, Any]]:
+    if config.reuse_baseline_experiment is not None:
+        from .baseline_reuse import import_baseline
+        return import_baseline(config)
     output = config.output / "baseline"
     required = tuple(
         output / name
@@ -470,6 +485,16 @@ def _evaluation(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[s
     output = config.output / "evaluation"
     summary_path = output / "evaluation_summary.json"
     details_path = output / "evaluation.json"
+    trace = output.with_suffix(".judge.trace.json")
+    history = config.output / "evaluation_attempts"
+    if trace.exists() and not (summary_path.is_file() and details_path.is_file()):
+        # A judge batch can be interrupted before write_evaluation. Keep its
+        # complete/pending calls rather than overwriting them on --resume.
+        attempt = history / f"attempt-{len(list(history.glob('attempt-*'))) + 1:04d}"
+        attempt.mkdir(parents=True, exist_ok=False)
+        trace.rename(attempt / trace.name)
+        if output.exists():
+            output.rename(attempt / output.name)
     if output.exists() and any(output.iterdir()):
         if not summary_path.is_file() or not details_path.is_file():
             raise FileExistsError(f"incomplete evaluation output cannot be reused: {output}")
@@ -490,10 +515,17 @@ def _evaluation(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[s
             dataset_path=config.dataset,
             prediction_path=config.output / "baseline" / "predictions.jsonl",
             judge_model=judge_model,
+            trace_path=output.with_suffix(".judge.trace.json"),
         )
         write_evaluation(output, details, value)
         summary = value.to_dict()
-    return {"primary": summary_path, "details": details_path}, summary
+    artifacts = {"primary": summary_path, "details": details_path}
+    trace = output.with_suffix(".judge.trace.json")
+    if trace.is_file():
+        artifacts["judge_trace"] = trace
+    if history.is_dir():
+        artifacts["attempt_history"] = history
+    return artifacts, summary
 
 
 def _trajectories(config: ExperimentConfig) -> tuple[Mapping[str, Path], Mapping[str, Any]]:
@@ -687,7 +719,8 @@ def _prepare_planning_retry(
 
     audit_path = output.with_suffix(".audit.json")
     candidate_path = output.with_suffix(".candidate.json")
-    existing = [path for path in (output, audit_path, candidate_path) if path.exists()]
+    existing = [path for path in (output, audit_path, candidate_path,
+                                 output.with_suffix(".trace.json")) if path.exists()]
     if not existing:
         return
     if not audit_path.is_file():
@@ -718,6 +751,9 @@ def _prepare_planning_retry(
 
 def _planning_artifacts(output: Path) -> dict[str, Path]:
     artifacts = {"primary": output, "audit": output.with_suffix(".audit.json")}
+    trace = output.with_suffix(".trace.json")
+    if trace.is_file():
+        artifacts["agent_trace"] = trace
     history = output.parent / "attempts" / output.stem
     if history.is_dir():
         artifacts["attempt_history"] = history

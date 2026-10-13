@@ -27,6 +27,7 @@ def main() -> int:
         "--judge", action=argparse.BooleanOptionalAction, default=True
     )
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--reuse-baseline-experiment", type=Path)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--task-id", action="append", default=[])
     parser.add_argument("--max-rounds", type=int, default=50)
@@ -61,6 +62,7 @@ def main() -> int:
         request_max_retries=args.request_max_retries,
         request_retry_base_seconds=args.request_retry_base_seconds,
         request_retry_max_seconds=args.request_retry_max_seconds,
+        reuse_baseline_experiment=args.reuse_baseline_experiment,
     )
     state = run_experiment(
         config,

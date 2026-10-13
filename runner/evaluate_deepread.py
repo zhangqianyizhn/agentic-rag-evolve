@@ -33,6 +33,7 @@ def main() -> int:
         dataset_path=args.dataset,
         prediction_path=args.predictions,
         judge_model=judge_model,
+        trace_path=args.output.with_suffix(".judge.trace.json"),
     )
     write_evaluation(args.output, details, summary)
     if args.historical:

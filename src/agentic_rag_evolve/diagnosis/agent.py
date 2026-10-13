@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 
 from agentic_rag_evolve.diagnostics import DiagnosticArtifactReader
+from agentic_rag_evolve.telemetry.evolution import traced_agent, record_agent_tool
 
 from .validator import DiagnosisValidationError, validate_diagnosis
 
@@ -284,6 +285,7 @@ def _restore_failed_attempt(
         if name not in {"read_source", "read_payload"}:
             continue
         result = _execute_tool(reader, name, event["arguments"])
+        record_agent_tool(name=name, arguments=event["arguments"], result=result, restored=True)
         (source_reads if name == "read_source" else payload_reads).append(result)
         audit["events"].append({**event, "restored": True})
     audit["recovery"] = {
@@ -296,6 +298,7 @@ def _restore_failed_attempt(
     return dict(candidate), source_reads, payload_reads, str(prior.get("error") or "invalid output")
 
 
+@traced_agent("diagnosis", directory_output=True)
 def run_diagnosis(
     *,
     bundle_path: Path,
@@ -564,6 +567,8 @@ def run_diagnosis(
                     ok = False
                     error = f"{type(exc).__name__}: {exc}"
                     tool_content = {"ok": False, "error": error}
+                record_agent_tool(name=name, arguments=arguments, result=tool_content,
+                                  call_id=call_id, round=round_number, ok=ok)
                 audit["events"].append(
                     {
                         "kind": "tool",

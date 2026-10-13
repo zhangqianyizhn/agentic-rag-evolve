@@ -89,6 +89,7 @@ def audit_candidate_tests(
     candidate_audit_path: Path,
     policy_path: Path,
     python_executable: Path,
+    log_directory: Path | None = None,
     command_runner: CommandRunner = _git,
     process_runner: ProcessRunner = _process,
 ) -> dict[str, Any]:
@@ -134,6 +135,11 @@ def audit_candidate_tests(
         raise ValueError("candidate source snapshot changed after static audit")
 
     results = []
+    if log_directory is not None:
+        log_directory = Path(log_directory).resolve()
+        if log_directory == candidate_path or candidate_path in log_directory.parents:
+            raise ValueError("test logs must be outside the candidate worktree")
+        log_directory.mkdir(parents=True, exist_ok=False)
     with tempfile.TemporaryDirectory(prefix="deepread-candidate-tests-") as directory:
         environment = _safe_environment(candidate_path, Path(directory) / "pycache")
         for check in checks:
@@ -196,6 +202,12 @@ def audit_candidate_tests(
                 stderr = f"{type(exc).__name__}: {exc}"
                 returncode = None
             elapsed = time.monotonic() - started
+            logs = {}
+            if log_directory is not None:
+                for label, content in (("stdout", stdout), ("stderr", stderr)):
+                    path = log_directory / f"check-{len(results) + 1:04d}.{label}.log"
+                    path.write_text(content, encoding="utf-8")
+                    logs[label + "_path"] = str(path)
             combined = stdout + "\n" + stderr
             matches = _RAN_TESTS.findall(combined)
             tests_run = int(matches[-1]) if matches else None
@@ -233,6 +245,7 @@ def audit_candidate_tests(
                     "stderr_sha256": hashlib.sha256(stderr.encode()).hexdigest(),
                     "stdout_tail": _bounded(stdout),
                     "stderr_tail": _bounded(stderr),
+                    **logs,
                 }
             )
 

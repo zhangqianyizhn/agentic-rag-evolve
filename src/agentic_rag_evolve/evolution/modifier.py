@@ -9,6 +9,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
+from agentic_rag_evolve.telemetry.evolution import traced_agent, record_agent_tool
 
 from .audit import candidate_snapshot_sha256, collect_changed_paths
 
@@ -272,6 +273,7 @@ class CandidateEditor:
         return violations
 
 
+@traced_agent("candidate_modification")
 def run_candidate_modification(
     *,
     manifest_path: Path,
@@ -437,6 +439,8 @@ def run_candidate_modification(
                 result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
                 ok, error = False, result["error"]
             event_arguments: dict[str, Any] = dict(arguments)
+            record_agent_tool(name=name, arguments=arguments, result=result,
+                              call_id=call_id, round=round_number, ok=ok)
             if name == "replace_text":
                 event_arguments = {
                     "path": str(arguments.get("path") or ""),

@@ -194,6 +194,15 @@ def _cli_stage(
                           cwd=cwd, allowed_codes=allowed_codes)
         files = products(directory, result)
         files.update(command=directory / "command.json")
+        # Include new logs when present without invalidating legacy checkpoints.
+        for path in sorted(directory.rglob("*.trace.json")):
+            files["trace:" + str(path.relative_to(directory))] = path
+        for path in sorted(directory.glob("*.logs")):
+            files["logs:" + path.name] = path
+        for label in ("stdout", "stderr"):
+            path = directory / (label + ".log")
+            if path.is_file():
+                files[label] = path
         return files, {**result, "paths": {k: str(v) for k, v in files.items()}}
     return checkpoint.run(name, action)
 

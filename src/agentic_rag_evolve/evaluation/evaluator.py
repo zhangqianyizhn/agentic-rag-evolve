@@ -97,7 +97,19 @@ def evaluate_financebench(
     dataset_path: Path,
     prediction_path: Path,
     judge_model: JudgeModel | None = None,
+    trace_path: Path | None = None,
 ) -> tuple[tuple[dict[str, Any], ...], EvaluationSummary]:
+    if trace_path is not None and judge_model is not None:
+        from agentic_rag_evolve.telemetry.evolution import traced_model
+        with traced_model(trace_path, "answer_judge", judge_model, {
+            "dataset": str(dataset_path), "predictions": str(prediction_path),
+        }) as recorder:
+            details, summary = evaluate_financebench(
+                dataset_path=dataset_path, prediction_path=prediction_path,
+                judge_model=recorder,
+            )
+            recorder.finish(summary)
+            return details, summary
     references = load_financebench_references(dataset_path)
     predictions = load_predictions(prediction_path)
     details: list[dict[str, Any]] = []

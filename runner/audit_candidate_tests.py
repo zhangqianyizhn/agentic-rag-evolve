@@ -24,6 +24,7 @@ def main() -> int:
         candidate_audit_path=args.candidate_audit,
         policy_path=args.policy,
         python_executable=args.python,
+        log_directory=args.output.with_suffix(".logs"),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(

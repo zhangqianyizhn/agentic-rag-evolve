@@ -219,6 +219,9 @@ class DiagnosisAgentTest(unittest.TestCase):
             )
             diagnosis = json.loads((output / "diagnosis.json").read_text())
             audit = json.loads((output / "audit.json").read_text())
+            trace = json.loads((output / "agent_trace.json").read_text())
+            self.assertEqual(len([e for e in trace["events"] if e["type"] == "model"]), 2)
+            self.assertTrue([e for e in trace["events"] if e["type"] == "tool"][0]["result"])
 
         self.assertEqual(report.status, "ok")
         self.assertEqual(report.rounds, 2)

@@ -9,6 +9,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping, Protocol
+from agentic_rag_evolve.telemetry.evolution import traced_agent, record_agent_tool
 
 from .memory import validate_planning_memory_context
 from .plan_validator import ModificationPlanValidationError, validate_modification_plan
@@ -161,6 +162,7 @@ def _execute_tool(
     raise ValueError(f"unknown planning tool: {name}")
 
 
+@traced_agent("modification_planning")
 def run_modification_planning(
     *,
     cohort_path: Path,
@@ -418,6 +420,8 @@ def run_modification_planning(
                     ok = False
                     error = f"{type(exc).__name__}: {exc}"
                     tool_content = {"ok": False, "error": error}
+                record_agent_tool(name=name, arguments=arguments, result=tool_content,
+                                  call_id=call_id, round=round_number, ok=ok)
                 audit["events"].append(
                     {
                         "kind": "tool",

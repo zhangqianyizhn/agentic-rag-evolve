@@ -107,6 +107,22 @@ class CandidateTestAuditTest(unittest.TestCase):
                     command_runner=self._git_runner,
                 )
 
+    def test_full_subprocess_logs_are_retained_outside_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, _, audit_path, policy_path = self._fixture(root)
+            text = "first diagnostic\n" + "x" * 20000 + "\nRan 12 tests in 0.01s\nOK\n"
+            result = audit_candidate_tests(
+                candidate_audit_path=audit_path, policy_path=policy_path,
+                python_executable=Path("/usr/bin/python3"), command_runner=self._git_runner,
+                process_runner=lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=text, stderr=""),
+                log_directory=root / "logs",
+            )
+            check = result["checks"][0]
+            self.assertEqual(Path(check["stdout_path"]).read_text(), text)
+            self.assertNotIn("first diagnostic", check["stdout_tail"])
+            self.assertTrue(result["passed"])
+
     def test_preserves_virtualenv_interpreter_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

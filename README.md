@@ -60,6 +60,8 @@ Markdown ingestion + 最小 DeepRead runtime + 隔离 gold label 的 DocumentQA 
 
 ## 当前入口
 
+完整采集框架 agent 输入输出、同时复用已有 DeepRead baseline 的连续入口为 `python -m runner.run_replay`。214 服务器挂后台命令、续跑方式和各阶段全量日志位置见 [全量日志重跑](docs/full-trace-replay.md)。
+
 ```bash
 uv run python runner/run_experiment.py --help
 uv run python runner/validate_reference.py --store <store_index> --run <historical_run>

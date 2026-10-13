@@ -39,10 +39,10 @@ nohup .venv/bin/python -u -m runner.run_replay \
 | diagnosis | `experiment/diagnoses/<task>/attempt-NNNN/diagnosis.json`、`audit.json` | 同目录 `agent_trace.json` |
 | hypothesis 聚合 | `experiment/planning/cohort.json` → `hypotheses.json` | `experiment/planning/hypotheses.trace.json` |
 | modification planning | cohort + hypotheses + 受限源码 → `plan.json` | `experiment/planning/plan.trace.json` |
-| candidate modification | `repairs/round-0001/plans/<plan>/modify/attempt-NNNN/modification.json` | 同目录 `modification.trace.json` |
-| 固定测试 | `repairs/round-0001/plans/<plan>/tests/attempt-NNNN/tests.json` | 同目录 `tests.logs/check-NNNN.stdout.log`、`stderr.log`，完整而非尾部截断 |
-| candidate DeepRead | `repairs/round-0001/plans/<plan>/run-development/attempt-NNNN/run/` | `deepread_trace.jsonl` |
-| candidate judge | `repairs/round-0001/plans/<plan>/eval-development/attempt-NNNN/evaluation/` | 同级 `evaluation.judge.trace.json` |
+| candidate modification | `repairs/round-0001/candidates/<plan>/attempt-NNNN/modify/attempt-MMMM/modification.json` | 同目录 `modification.trace.json` |
+| 固定测试 | `repairs/round-0001/candidates/<plan>/attempt-NNNN/tests/attempt-MMMM/tests.json` | 同目录 `tests.logs/check-NNNN.stdout.log`、`stderr.log`，完整而非尾部截断 |
+| candidate DeepRead | `repairs/round-0001/candidates/<plan>/attempt-NNNN/run-development/attempt-MMMM/run/` | `deepread_trace.jsonl` |
+| candidate judge | `repairs/round-0001/candidates/<plan>/attempt-NNNN/eval-development/attempt-MMMM/evaluation/` | 同级 `evaluation.judge.trace.json` |
 | 汇总 | `experiment/experiment_report.json`、`repairs/report.json` | 各 subprocess 阶段另有 `command.json`、`stdout.log`、`stderr.log` |
 
 具体阶段名以 `state.json` 和报告中的路径引用为准。失败的诊断/修改 attempt 留在原目录；失败的聚合/规划完整 trace 随其他产物归档到 `experiment/planning/attempts/<stage>/attempt-NNNN/`；被中断的初始 judge batch 在 `experiment/evaluation_attempts/`。确定性 triage 跳过的任务也写 trace，但 `events=[]`、outcome 为 `skipped`，不会为补日志调用模型。
